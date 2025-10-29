@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
+import os
+import platform
 import uuid
 from collections import defaultdict, deque
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Set
-import os
-import platform
 
 from fastapi import (
     APIRouter,
@@ -62,6 +62,9 @@ class TaskCreatePayload(BaseModel):
         ..., description="Library prefix path (e.g. /path/to/MyLib)"
     )
     overwrite: bool = False
+    overwrite_model: bool = Field(
+        False, description="Overwrite existing 3D models even if files exist already."
+    )
     symbol: bool = False
     footprint: bool = False
     model: bool = Field(False, description="Export 3D model")
@@ -379,19 +382,31 @@ def create_app(
 
             app.state.queue.task_done()
 
-    @app.on_event("startup")
-    async def startup() -> None:
-        if app.state.worker_task is None:
+    async def start_worker() -> None:
+        if app.state.worker_task is None or app.state.worker_task.done():
             app.state.worker_task = asyncio.create_task(worker())
 
-    @app.on_event("shutdown")
-    async def shutdown() -> None:
+    async def stop_worker() -> None:
+        worker_task = app.state.worker_task
+        if not worker_task:
+            return
         await app.state.queue.join()
-        if app.state.worker_task:
-            app.state.worker_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await app.state.worker_task
-            app.state.worker_task = None
+        worker_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await worker_task
+        app.state.worker_task = None
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        await start_worker()
+        try:
+            yield
+        finally:
+            await stop_worker()
+
+    app.router.lifespan_context = lifespan
+    app.state.start_worker = start_worker
+    app.state.stop_worker = stop_worker
 
     @router.post(
         "/tasks", status_code=status.HTTP_202_ACCEPTED, response_model=TaskSummary
@@ -403,6 +418,7 @@ def create_app(
                 lcsc_id=payload.lcsc_id,
                 output_prefix=payload.output_path,
                 overwrite=payload.overwrite,
+                overwrite_model=payload.overwrite_model,
                 generate_symbol=payload.symbol,
                 generate_footprint=payload.footprint,
                 generate_model=payload.model,
@@ -474,3 +490,15 @@ def create_app(
     app.include_router(router)
 
     return app
+
+
+async def startup_app(app: FastAPI) -> None:
+    start_worker = getattr(app.state, "start_worker", None)
+    if callable(start_worker):
+        await start_worker()
+
+
+async def shutdown_app(app: FastAPI) -> None:
+    stop_worker = getattr(app.state, "stop_worker", None)
+    if callable(stop_worker):
+        await stop_worker()

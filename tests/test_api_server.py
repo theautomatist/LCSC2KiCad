@@ -11,10 +11,10 @@ from easyeda2kicad.service import ConversionRequest, ConversionResult, Conversio
 def _dummy_runner(
     request: ConversionRequest, progress_cb
 ) -> ConversionResult:  # pragma: no cover - exercised through API
+    result = ConversionResult(symbol_path=str(Path(request.output_prefix).resolve()))
     if progress_cb:
         progress_cb(ConversionStage.FETCHING, 50, "Fetching")
         progress_cb(ConversionStage.COMPLETED, 100, "Done")
-        result = ConversionResult(symbol_path=str(Path(request.output_prefix).resolve()))
     result.messages.append("ok")
     return result
 
@@ -65,3 +65,36 @@ class TaskApiTest(unittest.TestCase):
             self.assertEqual(check.status_code, 200)
             check_data = check.json()
             self.assertTrue(check_data["resolved"])
+
+    def test_overwrite_model_forwarded(self) -> None:
+        captured = {}
+
+        def runner(request: ConversionRequest, progress_cb) -> ConversionResult:
+            captured["overwrite_model"] = request.overwrite_model
+            if progress_cb:
+                progress_cb(ConversionStage.FETCHING, 50, "Fetching")
+                progress_cb(ConversionStage.COMPLETED, 100, "Done")
+            result = ConversionResult(symbol_path=str(Path("./tmp/testlib").resolve()))
+            result.messages.append("ok")
+            return result
+
+        app = create_app(conversion_runner=runner)
+        with TestClient(app) as client:
+            response = client.post(
+                "/tasks",
+                json={
+                    "lcsc_id": "C5678",
+                    "output_path": "./tmp/testlib",
+                    "symbol": True,
+                    "model": True,
+                    "overwrite_model": True,
+                },
+            )
+            self.assertEqual(response.status_code, 202)
+            task_id = response.json()["id"]
+            for _ in range(20):
+                time.sleep(0.05)
+                detail = client.get(f"/tasks/{task_id}")
+                if detail.json()["status"] == "completed":
+                    break
+            self.assertTrue(captured.get("overwrite_model"))

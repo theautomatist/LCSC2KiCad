@@ -387,6 +387,7 @@ async function submitJob(payload) {
     symbol: Boolean(payload.symbol),
     footprint: Boolean(payload.footprint),
     model: Boolean(payload.model),
+    overwrite_model: Boolean(payload.overwrite_model),
     kicad_version: payload.kicadVersion || "v6",
     project_relative: Boolean(payload.projectRelative),
   };

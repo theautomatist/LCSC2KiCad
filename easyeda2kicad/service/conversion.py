@@ -363,7 +363,7 @@ def run_conversion(
         existing_wrl = wrl_path.exists()
         existing_step = step_path.exists()
 
-        if overwrite_model or (not existing_wrl and not existing_step):
+        if overwrite_model or (not existing_wrl or not existing_step):
             exporter.export(lib_path=str(output_path))
             if exporter.output:
                 result.model_paths["wrl"] = str(wrl_path)
