@@ -5,8 +5,11 @@ import contextlib
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Callable, Deque, Dict, List, Optional, Set
+import os
+import platform
 
 from fastapi import (
     APIRouter,
@@ -45,10 +48,10 @@ class TaskRecord:
     progress: int = 0
     message: Optional[str] = None
     error: Optional[str] = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
-    updated_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     result: Optional[ConversionResult] = None
     log: List[dict[str, Any]] = field(default_factory=list)
 
@@ -102,6 +105,106 @@ class TaskSummary(BaseModel):
 
 class TaskDetail(TaskSummary):
     log: List[dict[str, Any]]
+
+
+class PathRequest(BaseModel):
+    path: str
+
+
+def _fs_roots() -> List[dict[str, str]]:
+    roots: List[dict[str, str]] = []
+    seen: set[str] = set()
+
+    if os.name == "nt":
+        from string import ascii_uppercase
+
+        for letter in ascii_uppercase:
+            drive_path = Path(f"{letter}:/").resolve()
+            if drive_path.exists():
+                path_str = str(drive_path)
+                if path_str not in seen:
+                    roots.append(
+                        {
+                            "path": path_str,
+                            "label": f"{letter}:\\",
+                        }
+                    )
+                    seen.add(path_str)
+    else:
+        root_path = Path("/").resolve()
+        roots.append({"path": str(root_path), "label": "/"})
+        seen.add(str(root_path))
+
+    home_path = Path.home().resolve()
+    if str(home_path) not in seen:
+        roots.append({"path": str(home_path), "label": str(home_path)})
+        seen.add(str(home_path))
+
+    # Add common user directories if they exist
+    for relative in ("Documents", "Downloads", "Desktop"):
+        candidate = home_path / relative
+        if candidate.exists():
+            path_str = str(candidate.resolve())
+            if path_str not in seen:
+                roots.append({"path": path_str, "label": path_str})
+                seen.add(path_str)
+
+    return roots
+
+
+def _fs_list_directory(path: str) -> dict[str, Any]:
+    try:
+        target = Path(path).expanduser().resolve(strict=False)
+    except OSError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid path: {path}") from exc
+
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"Path does not exist: {path}")
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail=f"Path is not a directory: {path}")
+
+    entries: List[dict[str, Any]] = []
+    try:
+        with os.scandir(target) as it:
+            for entry in it:
+                entries.append(
+                    {
+                        "name": entry.name,
+                        "path": str(Path(entry.path).resolve(strict=False)),
+                        "is_dir": entry.is_dir(follow_symlinks=False),
+                        "is_symlink": entry.is_symlink(),
+                    }
+                )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=403, detail=f"Access denied for directory: {path}"
+        ) from exc
+
+    entries.sort(key=lambda item: (not item["is_dir"], item["name"].lower()))
+
+    parent = str(target.parent) if target.parent != target else None
+    return {"path": str(target), "parent": parent, "entries": entries}
+
+
+def _fs_check(path: str) -> dict[str, Any]:
+    target = Path(path).expanduser()
+    resolved = target.resolve(strict=False)
+    exists = target.exists()
+    is_dir = target.is_dir()
+
+    if exists and is_dir:
+        writable = os.access(str(target), os.W_OK)
+    else:
+        parent = target.parent if target.suffix else target.parent
+        writable = parent.exists() and os.access(str(parent), os.W_OK)
+
+    return {
+        "requested": path,
+        "resolved": str(resolved),
+        "exists": exists,
+        "is_dir": is_dir,
+        "writable": writable,
+    }
 
 
 def create_app(
@@ -196,7 +299,7 @@ def create_app(
                 return
             record.progress = max(0, min(100, percent))
             record.message = message
-            record.updated_at = datetime.utcnow()
+            record.updated_at = datetime.now(UTC)
             record.log.append(
                 {
                     "timestamp": record.updated_at.isoformat(),
@@ -207,10 +310,10 @@ def create_app(
             )
             if stage == ConversionStage.COMPLETED:
                 record.status = TaskStatus.COMPLETED
-                record.finished_at = datetime.utcnow()
+                record.finished_at = datetime.now(UTC)
             elif stage == ConversionStage.FAILED:
                 record.status = TaskStatus.FAILED
-                record.finished_at = datetime.utcnow()
+                record.finished_at = datetime.now(UTC)
             else:
                 record.status = TaskStatus.RUNNING
         await broadcast(task_id)
@@ -223,7 +326,7 @@ def create_app(
                 if app.state.pending and app.state.pending[0] == task.id:
                     app.state.pending.popleft()
                 task.status = TaskStatus.RUNNING
-                task.started_at = datetime.utcnow()
+                task.started_at = datetime.now(UTC)
                 task.updated_at = task.started_at
             await broadcast(task.id)
             await broadcast_queue_changes()
@@ -245,7 +348,7 @@ def create_app(
                     task.error = str(exc)
                     task.message = str(exc)
                     task.progress = task.progress or 0
-                    task.finished_at = datetime.utcnow()
+                    task.finished_at = datetime.now(UTC)
                     task.updated_at = task.finished_at
                     task.log.append(
                         {
@@ -262,7 +365,7 @@ def create_app(
                     task.result = result
                     task.progress = max(task.progress, 100)
                     task.message = "Conversion finished."
-                    task.finished_at = datetime.utcnow()
+                    task.finished_at = datetime.now(UTC)
                     task.updated_at = task.finished_at
                     task.log.append(
                         {
@@ -327,6 +430,18 @@ def create_app(
         async with app.state.task_lock:
             records = list(app.state.tasks.values())
         return [as_summary(record) for record in records]
+
+    @router.get("/fs/roots")
+    async def fs_roots() -> List[dict[str, str]]:
+        return _fs_roots()
+
+    @router.get("/fs/list")
+    async def fs_list(path: str) -> Dict[str, Any]:
+        return _fs_list_directory(path)
+
+    @router.post("/fs/check")
+    async def fs_check(payload: PathRequest) -> Dict[str, Any]:
+        return _fs_check(payload.path)
 
     @router.get("/tasks/{task_id}", response_model=TaskDetail)
     async def retrieve_task(task: TaskRecord = Depends(get_task)) -> TaskDetail:

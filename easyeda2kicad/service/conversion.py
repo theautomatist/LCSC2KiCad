@@ -49,6 +49,7 @@ class ConversionRequest:
     lcsc_id: str
     output_prefix: str
     overwrite: bool = False
+    overwrite_model: bool = False
     generate_symbol: bool = False
     generate_footprint: bool = False
     generate_model: bool = False
@@ -237,51 +238,51 @@ def run_conversion(
             component_name=sanitized_name,
             kicad_version=request.kicad_version,
         )
-        if existing and not request.overwrite:
-            raise ConversionError(
-                f"Symbol '{primary_symbol.info.name}' already exists. "
-                "Set overwrite to update."
-            )
-
-        exporter = ExporterSymbolKicad(
-            symbol=primary_symbol, kicad_version=request.kicad_version
-        )
-        exported_symbol = exporter.export(footprint_lib_name=library_name)
-
+        exported_symbol = ""
         exported_sub_symbols: List[str] = []
-        for sub_symbol in sub_symbols:
-            sub_exporter = ExporterSymbolKicad(
-                symbol=sub_symbol, kicad_version=request.kicad_version
-            )
-            sub_export = sub_exporter.export(footprint_lib_name=library_name)
-            if sub_export and sub_export != exported_symbol:
-                exported_sub_symbols.append(sub_export)
-
-        if existing:
-            update_component_in_symbol_lib_file(
-                lib_path=str(symbol_file),
-                component_name=sanitized_name,
-                component_content=exported_symbol,
-                kicad_version=request.kicad_version,
+        if existing and not request.overwrite:
+            result.messages.append(
+                f"Symbol '{primary_symbol.info.name}' bereits vorhanden – nicht überschrieben."
             )
         else:
-            add_component_in_symbol_lib_file(
-                lib_path=str(symbol_file),
-                component_content=exported_symbol,
-                kicad_version=request.kicad_version,
+            exporter = ExporterSymbolKicad(
+                symbol=primary_symbol, kicad_version=request.kicad_version
             )
-        if exported_sub_symbols and request.kicad_version == KicadVersion.v6:
-            add_sub_components_in_symbol_lib_file(
-                lib_path=str(symbol_file),
-                component_name=sanitized_name,
-                sub_components_content=exported_sub_symbols,
-                kicad_version=request.kicad_version,
-            )
-        elif exported_sub_symbols:
-            logging.warning(
-                "Multi-unit symbols are only supported for KiCad v6 libraries; skipping"
-                " additional units."
-            )
+            exported_symbol = exporter.export(footprint_lib_name=library_name)
+
+            for sub_symbol in sub_symbols:
+                sub_exporter = ExporterSymbolKicad(
+                    symbol=sub_symbol, kicad_version=request.kicad_version
+                )
+                sub_export = sub_exporter.export(footprint_lib_name=library_name)
+                if sub_export and sub_export != exported_symbol:
+                    exported_sub_symbols.append(sub_export)
+
+            if existing:
+                update_component_in_symbol_lib_file(
+                    lib_path=str(symbol_file),
+                    component_name=sanitized_name,
+                    component_content=exported_symbol,
+                    kicad_version=request.kicad_version,
+                )
+            else:
+                add_component_in_symbol_lib_file(
+                    lib_path=str(symbol_file),
+                    component_content=exported_symbol,
+                    kicad_version=request.kicad_version,
+                )
+            if exported_sub_symbols and request.kicad_version == KicadVersion.v6:
+                add_sub_components_in_symbol_lib_file(
+                    lib_path=str(symbol_file),
+                    component_name=sanitized_name,
+                    sub_components_content=exported_sub_symbols,
+                    kicad_version=request.kicad_version,
+                )
+            elif exported_sub_symbols:
+                logging.warning(
+                    "Multi-unit symbols are only supported for KiCad v6 libraries; skipping"
+                    " additional units."
+                )
 
         completed_steps += 1
         notify(
@@ -305,22 +306,21 @@ def run_conversion(
         footprint_exists = _footprint_exists(
             footprint_dir, easyeda_footprint.info.name
         )
-        if footprint_exists and not request.overwrite:
-            raise ConversionError(
-                f"Footprint '{easyeda_footprint.info.name}' already exists. "
-                "Set overwrite to update."
-            )
-
-        ki_footprint = ExporterFootprintKicad(footprint=easyeda_footprint)
         footprint_filename = f"{easyeda_footprint.info.name}.kicad_mod"
         model_path = str(model_dir).replace("\\", "/").replace("./", "/")
         if request.project_relative:
             model_path = "${KIPRJMOD}" + model_path
 
-        ki_footprint.export(
-            footprint_full_path=os.path.join(footprint_dir, footprint_filename),
-            model_3d_path=model_path,
-        )
+        if footprint_exists and not request.overwrite:
+            result.messages.append(
+                f"Footprint '{easyeda_footprint.info.name}' bereits vorhanden – nicht überschrieben."
+            )
+        else:
+            ki_footprint = ExporterFootprintKicad(footprint=easyeda_footprint)
+            ki_footprint.export(
+                footprint_full_path=os.path.join(footprint_dir, footprint_filename),
+                model_3d_path=model_path,
+            )
 
         completed_steps += 1
         notify(
@@ -347,7 +347,6 @@ def run_conversion(
             ).output
 
         exporter = Exporter3dModelKicad(model_3d=model_data)
-        exporter.export(lib_path=str(output_path))
 
         base_name = (
             os.path.splitext(exporter.input.name or "")[0]
@@ -357,16 +356,30 @@ def run_conversion(
         if not base_name:
             base_name = "easyeda_model"
         safe_base_name = base_name.replace("\\", "_").replace("/", "_")
-        wrl_path = os.path.join(
-            str(model_dir), f"{safe_base_name}.wrl"
-        ) if exporter.output else None
-        step_path = os.path.join(
-            str(model_dir), f"{safe_base_name}.step"
-        ) if exporter.output_step else None
-        if wrl_path:
-            result.model_paths["wrl"] = wrl_path
-        if step_path:
-            result.model_paths["step"] = step_path
+        wrl_path = Path(model_dir) / f"{safe_base_name}.wrl"
+        step_path = Path(model_dir) / f"{safe_base_name}.step"
+
+        overwrite_model = getattr(request, "overwrite_model", False) or request.overwrite
+        existing_wrl = wrl_path.exists()
+        existing_step = step_path.exists()
+
+        if overwrite_model or (not existing_wrl and not existing_step):
+            exporter.export(lib_path=str(output_path))
+            if exporter.output:
+                result.model_paths["wrl"] = str(wrl_path)
+            if exporter.output_step:
+                result.model_paths["step"] = str(step_path)
+        else:
+            if existing_wrl:
+                result.model_paths["wrl"] = str(wrl_path)
+            if existing_step:
+                result.model_paths["step"] = str(step_path)
+            result.messages.append(
+                "3D-Modell bereits vorhanden – nicht überschrieben."
+            )
+
+        if not result.model_paths:
+            result.messages.append("Kein 3D-Modell verfügbar.")
 
         completed_steps += 1
         notify(
