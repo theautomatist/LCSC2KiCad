@@ -7,12 +7,17 @@ const state = {
   defaultLibraryName: "",
   selectedLibraryPath: "",
   selectedLibraryName: "",
-  notificationsEnabled: true,
   overwriteFootprints: false,
   overwriteModels: false,
   debugLogs: false,
   jobs: [],
   jobHistory: [],
+  jobsLoading: false,
+  historyLoading: false,
+  historyFilter: "all",
+  historySearchTerm: "",
+  historyVisibleCount: 10,
+  historyPageSize: 10,
 };
 
 const elements = {};
@@ -21,9 +26,41 @@ let pathRoots = [];
 let currentDirectory = null;
 let currentEntries = [];
 let selectedEntryIndex = -1;
+let historySearchTimeout = null;
+let settingsSaveTimeout = null;
+let settingsFeedbackTimeout = null;
+const pathHistory = [];
+let lastTrackedHistorySearch = "";
+let lastPathInfoChecked = null;
+
+const SETTINGS_SAVE_DEBOUNCE_MS = 400;
+const SETTINGS_FEEDBACK_CLEAR_MS = 1500;
 
 function $(selector) {
   return document.querySelector(selector);
+}
+
+function logDebug(message, ...args) {
+  if (!state.debugLogs) {
+    return;
+  }
+  console.debug(`[popup] ${message}`, ...args);
+}
+
+function trackEvent(name, detail = {}) {
+  const payload = {
+    event: name,
+    detail,
+    timestamp: new Date().toISOString(),
+  };
+  console.info("[ui-event]", payload);
+}
+
+function resetCollection(container, selector) {
+  if (!container) {
+    return;
+  }
+  container.querySelectorAll(selector).forEach((node) => node.remove());
 }
 
 async function sendMessage(type, payload = {}) {
@@ -36,6 +73,7 @@ async function sendMessage(type, payload = {}) {
 
 function initElements() {
   elements.status = $("#connection-status");
+  elements.statusLabel = elements.status?.querySelector(".status-label");
   elements.tabs = document.querySelectorAll(".tab-button");
   elements.tabContents = document.querySelectorAll(".tab-content");
   elements.lcscId = $("#lcsc-id");
@@ -43,15 +81,12 @@ function initElements() {
   elements.selectedPath = $("#selected-path");
   elements.openPathBrowser = $("#open-path-browser");
   elements.pathBrowser = $("#path-browser");
-  elements.pathRoots = $("#path-roots");
   elements.pathEntries = $("#path-entries");
   elements.pathBreadcrumb = $("#path-breadcrumb");
-  elements.pathQuick = $("#path-quick");
   elements.pathManual = $("#path-manual");
   elements.pathGo = $("#path-go");
   elements.pathApply = $("#path-apply");
-  elements.pathUp = $("#path-up");
-  elements.pathClose = $("#path-close");
+  elements.pathBack = $("#path-back");
   elements.pathInfo = $("#path-info");
   elements.pathError = $("#path-error");
   elements.generateSymbol = $("#generate-symbol");
@@ -59,50 +94,60 @@ function initElements() {
   elements.generateModel = $("#generate-model");
   elements.overwriteExisting = $("#overwrite-existing");
   elements.jobError = $("#job-error");
+  elements.jobSuccess = $("#job-success");
   elements.jobForm = $("#job-form");
-  elements.jobsList = $("#jobs-list");
   elements.historyList = $("#history-list");
   elements.clearHistory = $("#clear-history");
+  elements.historySearch = $("#history-search");
+  elements.historyClearSearch = $("#history-clear-search");
+  elements.historyFilter = $("#history-filter");
+  elements.historyLoadMore = $("#history-load-more");
   elements.settingServerUrl = $("#setting-server-url");
   elements.settingDefaultPath = $("#setting-default-path");
   elements.settingDefaultName = $("#setting-default-name");
-  elements.settingNotifications = $("#setting-notifications");
   elements.settingOverwriteFootprints = $("#setting-overwrite-footprints");
   elements.settingOverwriteModels = $("#setting-overwrite-models");
   elements.settingDebugLogs = $("#setting-debug-logs");
   elements.settingUseSelected = $("#setting-use-selected");
-  elements.settingsSave = $("#settings-save");
   elements.settingsFeedback = $("#settings-feedback");
+  elements.jobSkip = $("#job-skip");
+  elements.jobReset = $("#job-reset");
 }
 
 function bindEvents() {
   elements.tabs.forEach((tab) => {
-    tab.addEventListener("click", () => switchTab(tab.dataset.tab));
+    tab.addEventListener("click", () => {
+      switchTab(tab.dataset.tab);
+      trackEvent("tab_changed", { tab: tab.dataset.tab });
+    });
   });
 
-  elements.openPathBrowser.addEventListener("click", () => togglePathBrowser(true));
-  elements.pathClose.addEventListener("click", () => togglePathBrowser(false));
-  elements.pathUp.addEventListener("click", () => {
-    if (currentDirectory?.parent) {
-      loadDirectory(currentDirectory.parent);
-    }
+  elements.openPathBrowser?.addEventListener("click", () => {
+    trackEvent("cta_clicked", { id: "open_path_browser" });
+    togglePathBrowser(true);
   });
-  elements.pathApply.addEventListener("click", applyCurrentPath);
-  elements.pathGo.addEventListener("click", handleManualPath);
-  elements.pathManual.addEventListener("keydown", (event) => {
+  elements.pathBack?.addEventListener("click", () => {
+    togglePathBrowser(false);
+    trackEvent("cta_clicked", { id: "path_back_close" });
+  });
+  elements.pathApply?.addEventListener("click", () => {
+    applyCurrentPath();
+    trackEvent("cta_clicked", { id: "path_apply" });
+  });
+  elements.pathGo?.addEventListener("click", () => {
+    handleManualPath();
+    trackEvent("cta_clicked", { id: "path_go" });
+  });
+  elements.pathManual?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
       handleManualPath();
+      trackEvent("search_submitted", { scope: "path_browser", input: elements.pathManual.value.trim() });
     }
   });
 
-  elements.pathRoots.addEventListener("change", (event) => {
-    if (event.target.value) {
-      loadDirectory(event.target.value);
-    }
-  });
-  elements.pathEntries.addEventListener("keydown", handlePathListKeydown);
-  elements.pathEntries.addEventListener(
+  elements.pathEntries?.addEventListener("keydown", handlePathListKeydown);
+  elements.pathEntries?.addEventListener(
     "focus",
     () => {
       if (!currentEntries.length) {
@@ -117,33 +162,239 @@ function bindEvents() {
     true,
   );
 
-  elements.jobForm.addEventListener("submit", handleJobSubmit);
-  elements.clearHistory.addEventListener("click", handleClearHistory);
-  elements.settingUseSelected.addEventListener("click", () => {
-    if (state.selectedLibraryPath) {
-      elements.settingDefaultPath.value = state.selectedLibraryPath;
+  elements.jobSkip?.addEventListener("click", () => {
+    applyDefaultPath();
+    trackEvent("cta_clicked", { id: "job_skip_to_defaults" });
+  });
+  elements.jobReset?.addEventListener("click", () => {
+    resetJobForm();
+    trackEvent("cta_clicked", { id: "job_reset" });
+  });
+  elements.submitJob = $("#submit-job");
+  elements.submitJob?.addEventListener("click", (event) => {
+    event.preventDefault();
+    handleJobSubmit(event);
+  });
+
+  elements.historySearch?.addEventListener("input", handleHistorySearchInput);
+  elements.historySearch?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      state.historyVisibleCount = state.historyPageSize;
+      finalizeHistorySearch(true);
     }
   });
-  elements.settingsSave.addEventListener("click", handleSettingsSave);
-  elements.settingNotifications.addEventListener("change", handleNotificationsToggle);
+  elements.historyClearSearch?.addEventListener("click", () => {
+    elements.historySearch.value = "";
+    state.historySearchTerm = "";
+    state.historyVisibleCount = state.historyPageSize;
+    finalizeHistorySearch(true);
+    trackEvent("cta_clicked", { id: "history_search_clear" });
+  });
+  elements.historyFilter?.addEventListener("change", (event) => {
+    state.historyFilter = event.target.value || "all";
+    state.historyVisibleCount = state.historyPageSize;
+    trackEvent("filter_applied", { scope: "history", filter: state.historyFilter });
+    renderHistory();
+  });
+  elements.historyLoadMore?.addEventListener("click", () => {
+    state.historyVisibleCount += state.historyPageSize;
+    trackEvent("cta_clicked", {
+      id: "history_load_more",
+      visibleCount: state.historyVisibleCount,
+    });
+    renderHistory();
+  });
+
+  elements.clearHistory?.addEventListener("click", handleClearHistory);
+
+  elements.settingUseSelected?.addEventListener("click", () => {
+    if (state.selectedLibraryPath) {
+      elements.settingDefaultPath.value = state.selectedLibraryPath;
+      trackEvent("cta_clicked", { id: "settings_use_selected_path" });
+      scheduleSettingsUpdate();
+    }
+  });
+  elements.settingServerUrl?.addEventListener("input", handleSettingsFieldChange);
+  elements.settingDefaultPath?.addEventListener("input", handleSettingsFieldChange);
+  elements.settingDefaultName?.addEventListener("input", handleSettingsFieldChange);
+  elements.settingOverwriteFootprints?.addEventListener("change", handleSettingsFieldChange);
+  elements.settingOverwriteModels?.addEventListener("change", handleSettingsFieldChange);
+  elements.settingDebugLogs?.addEventListener("change", handleSettingsFieldChange);
+}
+
+function resetJobForm() {
+  if (!elements.jobForm) {
+    return;
+  }
+  elements.lcscId.value = "";
+  elements.jobError.textContent = "";
+  elements.jobSuccess.textContent = "";
+  elements.generateSymbol.checked = true;
+  elements.generateFootprint.checked = false;
+  elements.generateModel.checked = false;
+  elements.overwriteExisting.checked = false;
+  if (!state.selectedLibraryName && elements.libraryName) {
+    elements.libraryName.value = state.defaultLibraryName || "";
+  }
+}
+
+function applyDefaultPath() {
+  const basePath = state.selectedLibraryPath || state.defaultLibraryPath || "";
+  if (!basePath) {
+    elements.jobError.textContent = "Bitte Standardpfad in den Einstellungen hinterlegen.";
+    return;
+  }
+  state.selectedLibraryPath = basePath;
+  if (elements.selectedPath) {
+    elements.selectedPath.value = basePath;
+  }
+  elements.jobError.textContent = "";
+  elements.jobSuccess.textContent = "Standardpfad übernommen.";
+  lastPathInfoChecked = null;
+  updatePathInfo(basePath);
+}
+
+function handleHistorySearchInput(event) {
+  state.historySearchTerm = event.target.value || "";
+  state.historyVisibleCount = state.historyPageSize;
+  if (historySearchTimeout) {
+    clearTimeout(historySearchTimeout);
+  }
+  historySearchTimeout = setTimeout(() => finalizeHistorySearch(false), 300);
+  renderHistory();
+}
+
+function finalizeHistorySearch(forceTrack) {
+  if (historySearchTimeout) {
+    clearTimeout(historySearchTimeout);
+    historySearchTimeout = null;
+  }
+  const term = state.historySearchTerm.trim();
+  if (forceTrack || term !== lastTrackedHistorySearch) {
+    trackEvent("search_submitted", {
+      scope: "history",
+      query: term,
+    });
+    lastTrackedHistorySearch = term;
+  }
+  renderHistory();
+}
+
+function handleSettingsFieldChange() {
+  scheduleSettingsUpdate();
+}
+
+function scheduleSettingsUpdate() {
+  if (!elements.settingsFeedback) {
+    return;
+  }
+  if (settingsSaveTimeout) {
+    clearTimeout(settingsSaveTimeout);
+  }
+  if (settingsFeedbackTimeout) {
+    clearTimeout(settingsFeedbackTimeout);
+    settingsFeedbackTimeout = null;
+  }
+  setSettingsFeedback("Speichern …", "success");
+  settingsSaveTimeout = setTimeout(applySettingsUpdate, SETTINGS_SAVE_DEBOUNCE_MS);
+}
+
+function setSettingsFeedback(message, type = "success") {
+  if (!elements.settingsFeedback) {
+    return;
+  }
+  const el = elements.settingsFeedback;
+  el.textContent = message || "";
+  el.classList.remove("feedback-error", "feedback-success");
+  if (!message) {
+    return;
+  }
+  if (type === "error") {
+    el.classList.add("feedback-error");
+  } else {
+    el.classList.add("feedback-success");
+  }
+}
+
+function collectSettingsPayload() {
+  const serverUrlInput = elements.settingServerUrl?.value ?? "";
+  const defaultPathInput = elements.settingDefaultPath?.value ?? "";
+  const defaultNameInput = elements.settingDefaultName?.value ?? "";
+
+  return {
+    serverUrl: serverUrlInput.trim(),
+    defaultLibraryPath: defaultPathInput.trim(),
+    defaultLibraryName: defaultNameInput.trim(),
+    overwriteFootprints: Boolean(elements.settingOverwriteFootprints?.checked),
+    overwriteModels: Boolean(elements.settingOverwriteModels?.checked),
+    debugLogs: Boolean(elements.settingDebugLogs?.checked),
+  };
+}
+
+async function applySettingsUpdate() {
+  settingsSaveTimeout = null;
+  try {
+    const payload = collectSettingsPayload();
+    const snapshot = await sendMessage("updateSettings", payload);
+    applyState(snapshot);
+    setSettingsFeedback("Gespeichert.", "success");
+    settingsFeedbackTimeout = setTimeout(() => {
+      setSettingsFeedback("");
+      settingsFeedbackTimeout = null;
+    }, SETTINGS_FEEDBACK_CLEAR_MS);
+  } catch (error) {
+    const message = error?.message || "Speichern fehlgeschlagen.";
+    setSettingsFeedback(message, "error");
+    if (settingsFeedbackTimeout) {
+      clearTimeout(settingsFeedbackTimeout);
+      settingsFeedbackTimeout = null;
+    }
+  }
+}
+
+function updatePathNavState() {
+  if (elements.pathBack) {
+    elements.pathBack.disabled = false;
+  }
 }
 
 function switchTab(tabId) {
   elements.tabs.forEach((tab) => {
-    tab.classList.toggle("active", tab.dataset.tab === tabId);
+    const isActive = tab.dataset.tab === tabId;
+    tab.classList.toggle("active", isActive);
+    tab.setAttribute("aria-pressed", String(isActive));
   });
   elements.tabContents.forEach((content) => {
-    content.classList.toggle("active", content.id === `tab-${tabId}`);
+    const isActive = content.id === `tab-${tabId}`;
+    content.classList.toggle("active", isActive);
+    content.setAttribute("aria-hidden", String(!isActive));
   });
 }
 
 function togglePathBrowser(show) {
   if (show) {
     elements.pathBrowser.classList.remove("hidden");
+    elements.pathBrowser.setAttribute("aria-hidden", "false");
+    elements.jobForm?.classList.add("collapsed");
     elements.pathManual.value = state.selectedLibraryPath || state.defaultLibraryPath || "";
+    pathHistory.length = 0;
+    if (elements.pathEntries) {
+      elements.pathEntries.dataset.currentPath = "";
+      elements.pathEntries.scrollTop = 0;
+    }
+    updatePathNavState();
     loadRoots();
   } else {
     elements.pathBrowser.classList.add("hidden");
+    elements.pathBrowser.setAttribute("aria-hidden", "true");
+    elements.jobForm?.classList.remove("collapsed");
+    pathHistory.length = 0;
+    if (elements.pathEntries) {
+      elements.pathEntries.dataset.currentPath = "";
+      elements.pathEntries.scrollTop = 0;
+    }
+    updatePathNavState();
   }
 }
 
@@ -151,100 +402,18 @@ async function loadRoots() {
   try {
     const data = await sendMessage("fs:listRoots");
     pathRoots = data || [];
-    renderRootOptions();
-    renderQuickLinks();
+    updatePathNavState();
 
     const manualPath = elements.pathManual.value.trim();
     if (manualPath) {
-      loadDirectory(manualPath);
+      loadDirectory(manualPath, { pushHistory: false });
     } else if (pathRoots.length > 0) {
-      loadDirectory(pathRoots[0].path);
+      loadDirectory(pathRoots[0].path, { pushHistory: false });
     }
   } catch (error) {
     elements.pathError.textContent = error.message;
+    updatePathNavState();
   }
-}
-
-function renderRootOptions() {
-  elements.pathRoots.innerHTML = "";
-  const currentPath = elements.pathManual.value.trim() || state.selectedLibraryPath || state.defaultLibraryPath;
-  let matchedValue = null;
-  pathRoots.forEach((root) => {
-    const option = document.createElement("option");
-    option.value = root.path;
-    option.textContent = root.label || root.path;
-    elements.pathRoots.appendChild(option);
-    if (currentPath && root.path && currentPath.startsWith(root.path)) {
-      matchedValue = root.path;
-    }
-  });
-  if (matchedValue) {
-    elements.pathRoots.value = matchedValue;
-  }
-}
-
-function formatPathLabel(path) {
-  if (!path) {
-    return "";
-  }
-  const normalized = path.replace(/\\/g, "/").replace(/\/$/, "");
-  if (normalized === "") {
-    return path;
-  }
-  const parts = normalized.split("/").filter(Boolean);
-  if (parts.length === 0) {
-    return path;
-  }
-  return parts[parts.length - 1] || path;
-}
-
-function renderQuickLinks() {
-  const container = elements.pathQuick;
-  if (!container) {
-    return;
-  }
-  container.innerHTML = "";
-  const seen = new Set();
-
-  const addLink = (path, label) => {
-    if (!path || seen.has(path)) {
-      return;
-    }
-    seen.add(path);
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "secondary";
-    button.textContent = label || formatPathLabel(path) || path;
-    button.dataset.path = path;
-    button.addEventListener("click", () => {
-      elements.pathManual.value = path;
-      loadDirectory(path);
-    });
-    container.appendChild(button);
-  };
-
-  pathRoots.forEach((root) => addLink(root.path, root.label || root.path));
-
-  [state.selectedLibraryPath, state.defaultLibraryPath].forEach((extraPath) => {
-    if (extraPath && !pathRoots.some((root) => root.path === extraPath)) {
-      addLink(extraPath, formatPathLabel(extraPath));
-    }
-  });
-
-  container.classList.toggle("hidden", seen.size === 0);
-}
-
-function highlightQuickLink(currentPath) {
-  const buttons = elements.pathQuick?.querySelectorAll("button") || [];
-  buttons.forEach((button) => {
-    const btnPath = button.dataset.path;
-    if (!btnPath) {
-      button.classList.remove("active");
-      return;
-    }
-    const isActive = currentPath && (currentPath === btnPath || currentPath.startsWith(btnPath));
-    button.classList.toggle("active", isActive);
-  });
 }
 
 async function handleManualPath() {
@@ -266,8 +435,9 @@ function createBreadcrumbSegments(path) {
   const windowsDrive = path.match(/^[A-Za-z]:/);
 
   if (windowsDrive) {
+    const drive = `${windowsDrive[0].toUpperCase()}:`;
     let current = `${windowsDrive[0]}\\`;
-    segments.push({ label: `${windowsDrive[0]}\\`, path: current });
+    segments.push({ label: drive, path: current });
     const remainder = path.slice(current.length).replace(/^[\\/]+/, "");
     if (!remainder) {
       return segments;
@@ -281,7 +451,7 @@ function createBreadcrumbSegments(path) {
 
   if (path.startsWith("/")) {
     let current = "/";
-    segments.push({ label: " / ".trim(), path: current });
+    segments.push({ label: "/", path: current });
     const parts = path.split("/").filter(Boolean);
     parts.forEach((part) => {
       current = current === "/" ? `/${part}` : `${current}/${part}`;
@@ -312,17 +482,31 @@ function renderBreadcrumb(path) {
     return;
   }
   segments.forEach((segment, index) => {
-    const button = document.createElement("span");
+    const button = document.createElement("button");
+    button.type = "button";
     button.className = "breadcrumb-item";
     button.textContent = segment.label;
-    button.tabIndex = 0;
-    button.addEventListener("click", () => loadDirectory(segment.path));
+    button.dataset.path = segment.path;
+    const isCurrent = index === segments.length - 1;
+
+    const navigateToSegment = () => {
+      if (isCurrent) {
+        return;
+      }
+      loadDirectory(segment.path, { pushHistory: true });
+      trackEvent("cta_clicked", { id: "path_breadcrumb", target: segment.path });
+    };
+    button.addEventListener("click", navigateToSegment);
     button.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        loadDirectory(segment.path);
+        navigateToSegment();
       }
     });
+    button.disabled = isCurrent;
+    if (isCurrent) {
+      button.classList.add("active");
+    }
     container.appendChild(button);
     if (index < segments.length - 1) {
       const separator = document.createElement("span");
@@ -345,14 +529,21 @@ function setSelectedEntry(index, focus = false) {
     const isSelected = itemIndex === index;
     item.setAttribute("aria-selected", isSelected ? "true" : "false");
     if (isSelected && focus) {
-      item.focus();
+      if (typeof item.focus === "function") {
+        try {
+          item.focus({ preventScroll: true });
+        } catch (error) {
+          item.focus();
+        }
+      }
     }
   });
 }
 
-function renderDirectoryEntries(entries) {
+function renderDirectoryEntries(entries, preserveScroll = false) {
   const list = Array.isArray(entries) ? entries : [];
   currentEntries = list.filter((entry) => entry.is_dir);
+  const previousScrollTop = preserveScroll ? elements.pathEntries.scrollTop : 0;
   elements.pathEntries.innerHTML = "";
 
   if (!currentEntries.length) {
@@ -403,6 +594,11 @@ function renderDirectoryEntries(entries) {
     selectedEntryIndex = 0;
   }
   selectedEntryIndex = Math.min(selectedEntryIndex, currentEntries.length - 1);
+  if (preserveScroll) {
+    elements.pathEntries.scrollTop = previousScrollTop;
+  } else {
+    elements.pathEntries.scrollTop = 0;
+  }
   setSelectedEntry(selectedEntryIndex, true);
 }
 
@@ -463,9 +659,16 @@ function handlePathListKeydown(event) {
 }
 
 async function updatePathInfo(path) {
+  if (!elements.pathInfo) {
+    return;
+  }
   if (!path) {
     elements.pathInfo.textContent = "";
     elements.pathInfo.classList.remove("invalid");
+    lastPathInfoChecked = null;
+    return;
+  }
+  if (path === lastPathInfoChecked) {
     return;
   }
   try {
@@ -484,20 +687,31 @@ async function updatePathInfo(path) {
       elements.pathInfo.classList.add("invalid");
     }
     elements.pathInfo.textContent = message;
+    lastPathInfoChecked = path;
   } catch (error) {
     elements.pathInfo.textContent = error.message;
     elements.pathInfo.classList.add("invalid");
+    lastPathInfoChecked = null;
   }
 }
 
-async function loadDirectory(path) {
+async function loadDirectory(path, options = {}) {
+  const { pushHistory = true } = options;
   try {
-    const data = await sendMessage("fs:listDirectory", { path });
+    const targetPath = String(path);
+    if (pushHistory && currentDirectory?.path && currentDirectory.path !== targetPath) {
+      pathHistory.push(currentDirectory.path);
+      if (pathHistory.length > 50) {
+        pathHistory.shift();
+      }
+    }
+    const data = await sendMessage("fs:listDirectory", { path: targetPath });
     currentDirectory = data;
     selectedEntryIndex = -1;
     updateDirectoryView();
     await updatePathInfo(currentDirectory.path);
     elements.pathError.textContent = "";
+    updatePathNavState();
   } catch (error) {
     elements.pathError.textContent = error.message;
   }
@@ -507,15 +721,16 @@ function updateDirectoryView() {
   if (!currentDirectory) {
     return;
   }
-  const matchingRoot = pathRoots.find((root) => currentDirectory.path.startsWith(root.path));
-  if (matchingRoot) {
-    elements.pathRoots.value = matchingRoot.path;
-  }
   const currentPath = currentDirectory.path;
   elements.pathManual.value = currentPath;
   renderBreadcrumb(currentPath);
-  renderDirectoryEntries(currentDirectory.entries);
-  highlightQuickLink(currentPath);
+  const previousPath = elements.pathEntries?.dataset?.currentPath || "";
+  const preserveScroll = previousPath === currentPath;
+  renderDirectoryEntries(currentDirectory.entries, preserveScroll);
+  if (elements.pathEntries) {
+    elements.pathEntries.dataset.currentPath = currentPath;
+  }
+  updatePathNavState();
 }
 
 async function applyCurrentPath() {
@@ -538,11 +753,13 @@ async function applyCurrentPath() {
     state.selectedLibraryPath = result?.path || currentDirectory.path;
     state.selectedLibraryName = result?.name || fallbackName;
     elements.libraryName.value = state.selectedLibraryName || "";
-    elements.selectedPath.textContent = state.selectedLibraryPath;
+    if (elements.selectedPath) {
+      elements.selectedPath.value = state.selectedLibraryPath;
+    }
     elements.pathManual.value = state.selectedLibraryPath;
-    highlightQuickLink(state.selectedLibraryPath);
+    lastPathInfoChecked = null;
     updatePathInfo(state.selectedLibraryPath);
-    elements.pathBrowser.classList.add("hidden");
+    togglePathBrowser(false);
     elements.pathError.textContent = "";
   } catch (error) {
     elements.pathError.textContent = error.message;
@@ -550,8 +767,9 @@ async function applyCurrentPath() {
 }
 
 async function handleJobSubmit(event) {
-  event.preventDefault();
+  event.preventDefault?.();
   elements.jobError.textContent = "";
+  elements.jobSuccess.textContent = "";
   const lcscId = elements.lcscId.value.trim();
   const libraryName = elements.libraryName.value.trim() || state.selectedLibraryName || state.defaultLibraryName || "easyeda2kicad";
   const libraryPath = state.selectedLibraryPath || state.defaultLibraryPath;
@@ -590,17 +808,37 @@ async function handleJobSubmit(event) {
   };
 
   const submitButton = $("#submit-job");
-  submitButton.disabled = true;
+  const previousDisabled = submitButton ? submitButton.disabled : false;
+  if (submitButton) {
+    submitButton.disabled = true;
+  }
+  state.jobsLoading = true;
+  renderHistory();
+  trackEvent("cta_clicked", {
+    id: "job_submit",
+    lcscId: lcscId.toUpperCase(),
+    outputs,
+    overwrite: payload.overwrite,
+    overwrite_model: payload.overwrite_model,
+    kicadVersion: payload.kicadVersion,
+  });
   try {
     await sendMessage("submitJob", { payload });
     elements.jobError.textContent = "";
     if (!state.selectedLibraryName) {
       state.selectedLibraryName = libraryName;
     }
+    elements.jobSuccess.textContent = "Job gestartet.";
   } catch (error) {
     elements.jobError.textContent = error.message;
+    state.jobsLoading = false;
   } finally {
-    submitButton.disabled = false;
+    if (submitButton) {
+      submitButton.disabled = previousDisabled;
+    }
+    if (!state.jobsLoading) {
+      renderHistory();
+    }
   }
 }
 
@@ -609,38 +847,7 @@ async function handleClearHistory() {
     await sendMessage("clearHistory");
     state.jobHistory = [];
     renderHistory();
-  } catch (error) {
-    console.error(error);
-  }
-}
-
-async function handleSettingsSave() {
-  elements.settingsFeedback.textContent = "";
-  try {
-    const snapshot = await sendMessage("updateSettings", {
-      serverUrl: elements.settingServerUrl.value.trim() || state.serverUrl,
-      defaultLibraryPath: elements.settingDefaultPath.value.trim(),
-      defaultLibraryName: elements.settingDefaultName.value.trim(),
-      overwriteFootprints: elements.settingOverwriteFootprints.checked,
-      overwriteModels: elements.settingOverwriteModels.checked,
-      debugLogs: elements.settingDebugLogs.checked,
-    });
-    applyState(snapshot);
-    elements.settingsFeedback.textContent = "Gespeichert.";
-    setTimeout(() => {
-      elements.settingsFeedback.textContent = "";
-    }, 2000);
-  } catch (error) {
-    elements.settingsFeedback.textContent = error.message;
-  }
-}
-
-async function handleNotificationsToggle() {
-  try {
-    const snapshot = await sendMessage("toggleNotifications", {
-      enabled: elements.settingNotifications.checked,
-    });
-    applyState(snapshot);
+    trackEvent("cta_clicked", { id: "history_clear" });
   } catch (error) {
     console.error(error);
   }
@@ -656,123 +863,373 @@ function applyState(newState) {
   state.defaultLibraryName = newState.defaultLibraryName || "";
   state.selectedLibraryPath = newState.selectedLibraryPath || state.selectedLibraryPath || "";
   state.selectedLibraryName = newState.selectedLibraryName || state.selectedLibraryName || "";
-  state.notificationsEnabled = Boolean(newState.notificationsEnabled);
   state.overwriteFootprints = Boolean(newState.overwriteFootprints);
   state.overwriteModels = Boolean(newState.overwriteModels);
   state.debugLogs = Boolean(newState.debugLogs);
   state.jobs = Array.isArray(newState.jobs) ? newState.jobs : [];
   state.jobHistory = Array.isArray(newState.jobHistory) ? newState.jobHistory : [];
+  state.jobsLoading = false;
+  state.historyLoading = false;
   render();
 }
 
 function render() {
   updateStatusIndicator();
-  elements.settingServerUrl.value = state.serverUrl;
-  elements.settingDefaultPath.value = state.defaultLibraryPath;
-  elements.settingDefaultName.value = state.defaultLibraryName;
-  elements.settingNotifications.checked = state.notificationsEnabled;
-  elements.settingOverwriteFootprints.checked = state.overwriteFootprints;
-  elements.settingOverwriteModels.checked = state.overwriteModels;
-  elements.settingDebugLogs.checked = state.debugLogs;
-
-  elements.selectedPath.textContent = state.selectedLibraryPath || "Kein Pfad gewählt";
+  if (elements.settingServerUrl) {
+    elements.settingServerUrl.value = state.serverUrl;
+  }
+  if (elements.settingDefaultPath) {
+    elements.settingDefaultPath.value = state.defaultLibraryPath;
+  }
+  if (elements.settingDefaultName) {
+    elements.settingDefaultName.value = state.defaultLibraryName;
+  }
+  if (elements.settingOverwriteFootprints) {
+    elements.settingOverwriteFootprints.checked = state.overwriteFootprints;
+  }
+  if (elements.settingOverwriteModels) {
+    elements.settingOverwriteModels.checked = state.overwriteModels;
+  }
+  if (elements.settingDebugLogs) {
+    elements.settingDebugLogs.checked = state.debugLogs;
+  }
+  if (elements.selectedPath) {
+    elements.selectedPath.value = state.selectedLibraryPath || "";
+  }
   if (!elements.libraryName.value) {
     elements.libraryName.value = state.selectedLibraryName || state.defaultLibraryName || "";
   }
-
-  renderJobs();
+  if (elements.historySearch && document.activeElement !== elements.historySearch) {
+    elements.historySearch.value = state.historySearchTerm;
+  }
+  if (elements.historyFilter) {
+    elements.historyFilter.value = state.historyFilter || "all";
+  }
+  if (elements.historyClearSearch) {
+    elements.historyClearSearch.disabled = !(state.historySearchTerm && state.historySearchTerm.trim());
+  }
+  if (elements.pathInfo) {
+    if (state.selectedLibraryPath) {
+      updatePathInfo(state.selectedLibraryPath);
+    } else {
+      elements.pathInfo.textContent = "";
+      elements.pathInfo.classList.remove("invalid");
+    }
+  }
+  updatePathNavState();
   renderHistory();
 }
 
 function updateStatusIndicator() {
-  elements.status.textContent = state.connected ? "Verbunden" : "Offline";
-  elements.status.classList.toggle("status-online", state.connected);
-  elements.status.classList.toggle("status-offline", !state.connected);
-}
-
-function renderJobs() {
-  const container = elements.jobsList;
-  container.innerHTML = "";
-  if (!state.jobs.length) {
-    container.classList.add("empty");
-    container.innerHTML = "<p>Keine aktiven Jobs.</p>";
+  if (!elements.status) {
     return;
   }
-  container.classList.remove("empty");
-
-  state.jobs
-    .sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0))
-    .forEach((job) => {
-      const item = document.createElement("div");
-      item.className = "job-item";
-
-      const header = document.createElement("div");
-      header.className = "job-header";
-      const title = document.createElement("div");
-      title.innerHTML = `<strong>${job.lcscId || job.id}</strong> – ${job.libraryName || "Bibliothek"}`;
-      const status = document.createElement("span");
-      status.className = `status-pill status-${job.status}`;
-      status.textContent = job.status;
-      header.appendChild(title);
-      header.appendChild(status);
-
-      const details = document.createElement("div");
-      details.className = "job-details";
-      details.innerHTML = `
-        <div>Pfad: <code>${job.libraryPath || "–"}</code></div>
-        <div>Warteschlange: ${job.queue_position || "-"} | Nachricht: ${job.message || "-"}</div>
-      `;
-
-      const progress = document.createElement("div");
-      progress.className = "job-progress";
-      const progressInner = document.createElement("span");
-      const percent = Number.isFinite(job.progress) ? Math.max(0, Math.min(100, job.progress)) : 0;
-      progressInner.style.width = `${percent}%`;
-      progress.appendChild(progressInner);
-
-      item.appendChild(header);
-      item.appendChild(details);
-      item.appendChild(progress);
-      container.appendChild(item);
-    });
+  const label = state.connected ? "Verbunden" : "Offline";
+  elements.status.dataset.state = state.connected ? "online" : "offline";
+  elements.status.classList.toggle("status-online", state.connected);
+  elements.status.classList.toggle("status-offline", !state.connected);
+  if (elements.statusLabel) {
+    elements.statusLabel.textContent = label;
+  } else {
+    elements.status.textContent = label;
+  }
 }
 
 function renderHistory() {
   const container = elements.historyList;
-  container.innerHTML = "";
-  if (!state.jobHistory.length) {
-    container.classList.add("empty");
-    container.innerHTML = "<p>Noch keine Einträge.</p>";
+  if (!container) {
     return;
   }
-  container.classList.remove("empty");
+  resetCollection(container, ".history-card, .job-card");
 
-  state.jobHistory.forEach((entry) => {
-    const item = document.createElement("div");
-    item.className = "history-item";
+  if (state.historyLoading || state.jobsLoading) {
+    container.dataset.state = "loading";
+    if (elements.historyLoadMore) {
+      elements.historyLoadMore.hidden = true;
+    }
+    return;
+  }
 
-    const header = document.createElement("div");
-    header.className = "history-header-row";
-    const title = document.createElement("div");
-    title.innerHTML = `<strong>${entry.lcscId || entry.id}</strong> – ${entry.libraryName || "Bibliothek"}`;
-    const status = document.createElement("span");
-    status.className = `status-pill status-${entry.status}`;
-    status.textContent = entry.status;
-    header.appendChild(title);
-    header.appendChild(status);
+  const entries = getTimelineEntries();
+  const emptyPlaceholder = container.querySelector('.collection-placeholder[data-state="empty"]');
+  if (emptyPlaceholder) {
+    if (state.jobs.length === 0 && state.jobHistory.length === 0) {
+      emptyPlaceholder.textContent = "Noch keine Jobs oder Einträge.";
+    } else if (state.historySearchTerm.trim()) {
+      emptyPlaceholder.textContent = `Keine Treffer für „${state.historySearchTerm.trim()}“.`;
+    } else {
+      emptyPlaceholder.textContent = "Keine Einträge für den aktuellen Filter.";
+    }
+  }
 
-    const details = document.createElement("div");
-    const finishedAt = entry.finished_at ? new Date(entry.finished_at).toLocaleString() : "–";
-    details.innerHTML = `
-      <div>Pfad: <code>${entry.libraryPath || "–"}</code></div>
-      <div>Abgeschlossen: ${finishedAt}</div>
-      <div>Nachricht: ${entry.message || "-"}</div>
-    `;
+  if (!entries.length) {
+    container.dataset.state = "empty";
+    if (elements.historyLoadMore) {
+      elements.historyLoadMore.hidden = true;
+    }
+    return;
+  }
 
-    item.appendChild(header);
-    item.appendChild(details);
-    container.appendChild(item);
+  container.dataset.state = "ready";
+  const visibleCount = Math.max(state.historyPageSize, state.historyVisibleCount);
+  const visible = entries.slice(0, visibleCount);
+  visible.forEach((entry) => {
+    container.appendChild(buildTimelineCard(entry));
   });
+  if (elements.historyLoadMore) {
+    elements.historyLoadMore.hidden = visible.length >= entries.length;
+  }
+}
+
+function buildJobCard(job) {
+  const card = document.createElement("article");
+  card.className = "job-card";
+
+  const header = document.createElement("div");
+  header.className = "job-card-header";
+
+  const title = document.createElement("div");
+  const titleStrong = document.createElement("strong");
+  titleStrong.textContent = job.lcscId || job.id;
+  title.appendChild(titleStrong);
+  const titleSuffix = document.createElement("span");
+  titleSuffix.textContent = ` · ${job.libraryName || "Bibliothek"}`;
+  title.appendChild(titleSuffix);
+
+  header.appendChild(title);
+  header.appendChild(createStatusChip(job.status));
+  card.appendChild(header);
+
+  const meta = document.createElement("div");
+  meta.className = "job-meta";
+  appendMetaRow(meta, "Pfad", job.libraryPath || "–", { code: true });
+
+  const queuePosition = Number.isFinite(job.queue_position) ? job.queue_position : "–";
+  const progressValue = Number.isFinite(job.progress)
+    ? `${Math.max(0, Math.min(100, job.progress))}%`
+    : "0%";
+  appendMetaRow(meta, "Warteschlange", `${queuePosition}`);
+  appendMetaRow(meta, "Fortschritt", progressValue);
+  appendMetaRow(meta, "Ausgabe", describeOutputs(job.outputs));
+  appendMetaRow(meta, "Gestartet", formatDateTime(job.created_at));
+  appendMetaRow(meta, "Nachricht", job.message || "–");
+
+  if (Array.isArray(job.result?.messages) && job.result.messages.length) {
+    appendMetaRow(meta, "Hinweise", job.result.messages.join(" · "));
+  }
+
+  card.appendChild(meta);
+
+  const progress = document.createElement("div");
+  progress.className = "job-progress";
+  const progressInner = document.createElement("span");
+  progressInner.style.width = progressValue;
+  progress.appendChild(progressInner);
+  card.appendChild(progress);
+
+  return card;
+}
+
+function buildHistoryCard(entry) {
+  const card = document.createElement("article");
+  card.className = "history-card";
+
+  const header = document.createElement("div");
+  header.className = "history-card-header";
+  const title = document.createElement("div");
+  const titleStrong = document.createElement("strong");
+  titleStrong.textContent = entry.lcscId || entry.id;
+  title.appendChild(titleStrong);
+  const titleSuffix = document.createElement("span");
+  titleSuffix.textContent = ` · ${entry.libraryName || "Bibliothek"}`;
+  title.appendChild(titleSuffix);
+  header.appendChild(title);
+  header.appendChild(createStatusChip(entry.status));
+  card.appendChild(header);
+
+  const meta = document.createElement("div");
+  meta.className = "history-meta";
+  appendMetaRow(meta, "Pfad", entry.libraryPath || "–", { code: true });
+  appendMetaRow(meta, "Gestartet", formatDateTime(entry.created_at));
+  appendMetaRow(meta, "Abgeschlossen", formatDateTime(entry.finished_at || entry.updated_at));
+  appendMetaRow(meta, "Ausgabe", describeOutputs(entry.outputs || entry.result));
+  appendMetaRow(meta, "Nachricht", entry.message || entry.result?.messages?.join(" · ") || "–");
+
+  const outputs = entry.result?.model_paths || {};
+  if (outputs && typeof outputs === "object" && Object.keys(outputs).length) {
+    appendMetaRow(meta, "Modelle", Object.values(outputs).join(", "));
+  }
+
+  card.appendChild(meta);
+  return card;
+}
+
+function getTimelineEntries() {
+  const statusFilter = (state.historyFilter || "all").toLowerCase();
+  const term = state.historySearchTerm.trim().toLowerCase();
+  const activeJobs = Array.isArray(state.jobs) ? state.jobs : [];
+  const historyEntries = Array.isArray(state.jobHistory) ? state.jobHistory : [];
+  const seen = new Set();
+  const entries = [];
+
+  const matchesSearch = (raw) => {
+    if (!term) {
+      return true;
+    }
+    const haystack = [
+      raw.lcscId,
+      raw.lcsc_id,
+      raw.libraryName,
+      raw.libraryPath,
+      raw.message,
+      raw.id,
+      ...(raw.result?.messages || []),
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(term);
+  };
+
+  const pushEntry = (raw, source) => {
+    if (!raw) {
+      return;
+    }
+    const normalizedStatus = (raw.status || "").toLowerCase();
+    if (statusFilter !== "all" && normalizedStatus !== statusFilter) {
+      return;
+    }
+    if (!matchesSearch(raw)) {
+      return;
+    }
+    const isActive = isActiveStatus(normalizedStatus);
+    const createdTimestamp = dateToTimestamp(
+      raw.created_at || raw.started_at || raw.updated_at || raw.finished_at,
+    );
+    const completedTimestamp = dateToTimestamp(
+      raw.finished_at || raw.updated_at || raw.created_at || raw.started_at,
+    );
+    entries.push({
+      source,
+      raw,
+      status: normalizedStatus,
+      isActive,
+      sortTimestamp: isActive ? createdTimestamp : completedTimestamp,
+      secondaryTimestamp: completedTimestamp,
+    });
+  };
+
+  activeJobs.forEach((job) => {
+    const key = job?.id || job?.lcscId || job?.lcsc_id;
+    if (key) {
+      seen.add(key);
+    }
+    pushEntry(job, "active");
+  });
+
+  historyEntries.forEach((entry) => {
+    const key = entry?.id || entry?.lcscId || entry?.lcsc_id;
+    if (key && seen.has(key)) {
+      return;
+    }
+    pushEntry(entry, "history");
+  });
+
+  entries.sort((a, b) => {
+    if (a.isActive !== b.isActive) {
+      return a.isActive ? -1 : 1;
+    }
+    if (b.sortTimestamp !== a.sortTimestamp) {
+      return b.sortTimestamp - a.sortTimestamp;
+    }
+    return (b.secondaryTimestamp || 0) - (a.secondaryTimestamp || 0);
+  });
+
+  return entries;
+}
+
+function buildTimelineCard(entry) {
+  return entry.source === "active" ? buildJobCard(entry.raw) : buildHistoryCard(entry.raw);
+}
+
+function isActiveStatus(status) {
+  return status === "queued" || status === "running" || status === "pending";
+}
+
+function createStatusChip(status) {
+  const chip = document.createElement("span");
+  const normalized = (status || "queued").toLowerCase();
+  chip.className = `status-chip status-${normalized}`;
+  chip.textContent = normalized.toUpperCase();
+  return chip;
+}
+
+function appendMetaRow(container, label, value, options = {}) {
+  const row = document.createElement("div");
+  row.className = "meta-row";
+  const labelSpan = document.createElement("span");
+  labelSpan.className = "meta-label";
+  labelSpan.textContent = `${label}:`;
+  row.appendChild(labelSpan);
+  const resolvedValue =
+    value === undefined || value === null || value === "" ? "–" : String(value);
+  if (options.code) {
+    const code = document.createElement("code");
+    code.textContent = resolvedValue;
+    row.appendChild(code);
+  } else {
+    const valueSpan = document.createElement("span");
+    valueSpan.textContent = resolvedValue;
+    row.appendChild(valueSpan);
+  }
+  container.appendChild(row);
+}
+
+function describeOutputs(outputs) {
+  if (!outputs) {
+    return "Symbol";
+  }
+  const flags = new Set();
+  const sources = Array.isArray(outputs) ? outputs : [outputs];
+  sources.forEach((source) => {
+    if (!source || typeof source !== "object") {
+      return;
+    }
+    if (source.symbol || source.generate_symbol || source.symbol_path) {
+      flags.add("Symbol");
+    }
+    if (source.footprint || source.generate_footprint || source.footprint_path) {
+      flags.add("Footprint");
+    }
+    const hasModel =
+      source.model
+      || source.generate_model
+      || Boolean(source.model_paths && Object.keys(source.model_paths).length);
+    if (hasModel) {
+      flags.add("3D-Modell");
+    }
+  });
+  return flags.size ? Array.from(flags).join(" · ") : "Keine Ausgaben";
+}
+
+function dateToTimestamp(value) {
+  if (!value) {
+    return 0;
+  }
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "–";
+  }
+  try {
+    return new Date(value).toLocaleString();
+  } catch (error) {
+    logDebug("Konnte Datum nicht formatieren", value, error);
+    return value;
+  }
 }
 
 async function bootstrap() {

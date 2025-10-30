@@ -7,159 +7,259 @@
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <div class="container">
-      <header class="header">
-        <h1>easyeda2kicad</h1>
-        <span id="connection-status" class="status status-offline">Offline</span>
+    <div class="app">
+      <header class="app-header">
+        <h1 class="app-title">easyeda2kicad</h1>
+        <div
+          id="connection-status"
+          class="status-pill status-offline"
+          role="status"
+          aria-live="polite"
+          data-state="offline"
+        >
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="status-label">Offline</span>
+        </div>
       </header>
 
-      <nav class="tabs">
-        <button class="tab-button active" data-tab="jobs">Jobs</button>
-        <button class="tab-button" data-tab="history">History</button>
-        <button class="tab-button" data-tab="settings">Settings</button>
+      <nav class="tabs" aria-label="Ansichten">
+        <button class="tab-button active" data-tab="jobs" id="tab-button-jobs">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M5 20h14a2 2 0 0 0 2-2v-7h-4v3l-5-5-5 5v-3H3v7a2 2 0 0 0 2 2Zm7-12 5-5h-3V2h-4v1H7l5 5Z"
+            />
+          </svg>
+          <span>Downloads</span>
+        </button>
+        <button class="tab-button" data-tab="history" id="tab-button-history">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 5a7 7 0 1 1-4.95 11.95 1 1 0 1 1 1.41-1.41A5 5 0 1 0 7 12H5a1 1 0 0 1-1-1V6a1 1 0 0 1 2 0v2.09A6.98 6.98 0 0 1 12 5Zm1 3v4.59l2.3 2.3a1 1 0 0 1-1.42 1.42l-2.59-2.59A1 1 0 0 1 11 13V8a1 1 0 1 1 2 0Z"
+            />
+          </svg>
+          <span>Verlauf</span>
+        </button>
+        <button class="tab-button" data-tab="settings" id="tab-button-settings">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M21 13.5v-3l-2.1-.3a6.82 6.82 0 0 0-.6-1.4l1.2-1.8-2.1-2.1-1.8 1.2a6.82 6.82 0 0 0-1.4-.6L13.5 3h-3l-.3 2.1a6.82 6.82 0 0 0-1.4.6L7 4.5 4.9 6.6l1.2 1.8a6.82 6.82 0 0 0-.6 1.4L3 10.5v3l2.1.3a6.82 6.82 0 0 0 .6 1.4l-1.2 1.8L6.6 19l1.8-1.2a6.82 6.82 0 0 0 1.4.6l.3 2.1h3l.3-2.1a6.82 6.82 0 0 0 1.4-.6l1.8 1.2 2.1-2.1-1.2-1.8a6.82 6.82 0 0 0 .6-1.4Zm-9 2.5a4 4 0 1 1 4-4 4 4 0 0 1-4 4Z"
+            />
+          </svg>
+          <span>Einstellungen</span>
+        </button>
       </nav>
 
-      <section id="tab-jobs" class="tab-content active">
-        <form id="job-form" class="card">
-          <div class="field">
-            <label for="lcsc-id">LCSC ID</label>
-            <input id="lcsc-id" type="text" placeholder="z. B. C8734" required />
-          </div>
+      <main class="app-main">
+        <section id="tab-jobs" class="tab-content active" role="tabpanel" aria-labelledby="tab-button-jobs">
+          <form id="job-form" class="panel panel-form" novalidate>
+            <header class="panel-header">
+              <div>
+                <h2>Neuer Download</h2>
+                <p class="panel-description">Bauteil-ID und Ziel festlegen.</p>
+              </div>
+              <div class="panel-actions">
+                <button type="button" id="job-skip" class="button button-ghost">Standard nutzen</button>
+                <button type="button" id="job-reset" class="button button-tertiary">Zurücksetzen</button>
+              </div>
+            </header>
 
-          <div class="field">
-            <label for="library-name">Bibliotheksname</label>
-            <input id="library-name" type="text" placeholder="easyeda2kicad" />
-          </div>
+            <div class="panel-body">
+              <div class="job-primary-row">
+                <div class="field lcsc-field">
+                  <label for="lcsc-id">LCSC ID <span class="required">*</span></label>
+                  <div class="lcsc-inline">
+                    <input id="lcsc-id" type="text" inputmode="text" autocomplete="off" placeholder="C8734" required />
+                    <button type="button" id="submit-job" class="button button-primary">
+                      <span class="button-label">Download</span>
+                    </button>
+                  </div>
+                  <p class="help-text">Beispiel: C8734</p>
+                </div>
+              </div>
 
-          <div class="field">
-            <label>Bibliothekspfad</label>
-            <div class="path-display">
-              <span id="selected-path">Kein Pfad gewählt</span>
-              <button type="button" id="open-path-browser" class="secondary">
-                Pfad wählen
+              <div class="field">
+                <label for="selected-path">Bibliothekspfad <span class="required">*</span></label>
+                <div class="composite-input">
+                  <input id="selected-path" type="text" readonly placeholder="Pfad wählen" />
+                  <button type="button" id="open-path-browser" class="button button-secondary">
+                    Ordner wählen
+                  </button>
+                </div>
+                <p id="path-info" class="help-text" aria-live="polite"></p>
+              </div>
+
+              <div class="field">
+                <label for="library-name">Bibliotheksname</label>
+                <input id="library-name" type="text" placeholder="easyeda2kicad" />
+              </div>
+
+              <details id="job-advanced" class="disclosure">
+                <summary>Download Options</summary>
+                <div class="disclosure-body">
+
+                  <fieldset class="field-group">
+                    <legend>Ausgabe</legend>
+                    <label class="checkbox">
+                      <input type="checkbox" id="generate-symbol" checked />
+                      <span>Symbol exportieren</span>
+                    </label>
+                    <label class="checkbox">
+                      <input type="checkbox" id="generate-footprint" checked />
+                      <span>Footprint exportieren</span>
+                    </label>
+                    <label class="checkbox">
+                      <input type="checkbox" id="generate-model" checked />
+                      <span>3D-Modell exportieren</span>
+                    </label>
+                  </fieldset>
+
+                  <fieldset class="field-group">
+                    <legend>Überschreiben</legend>
+                    <label class="checkbox">
+                      <input type="checkbox" id="overwrite-existing" />
+                      <span>Bestehende Ressourcen überschreiben</span>
+                    </label>
+                  </fieldset>
+                </div>
+              </details>
+
+              <p id="job-error" class="feedback feedback-error" role="alert"></p>
+              <p id="job-success" class="feedback feedback-success" role="status"></p>
+            </div>
+          </form>
+
+          <section id="path-browser" class="panel path-browser hidden" aria-hidden="true">
+            <header class="path-browser-header">
+              <h2>Pfad auswählen</h2>
+              <button type="button" id="path-back" class="button button-tertiary" title="Zurück zur Auswahl">
+                ← Zurück
+              </button>
+            </header>
+
+            <div class="path-browser-body">
+              <div class="path-current" id="path-breadcrumb" aria-label="Aktueller Pfad"></div>
+
+              <div class="path-input-row">
+                <input id="path-manual" type="text" placeholder="Pfad eingeben oder einfügen" />
+                <button type="button" id="path-go" class="button button-secondary">Öffnen</button>
+              </div>
+
+              <ul id="path-entries" class="path-list" tabindex="0" aria-label="Ordnerliste"></ul>
+
+              <div class="path-browser-footer">
+                <p id="path-error" class="feedback feedback-error" role="alert"></p>
+                <div class="path-browser-actions">
+                  <button type="button" id="path-apply" class="button button-primary">Diesen Ordner verwenden</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+        </section>
+
+        <section id="tab-history" class="tab-content" role="tabpanel" aria-labelledby="tab-button-history">
+          <div class="panel">
+            <header class="panel-header">
+              <div>
+                <h2>Verlauf</h2>
+                <p class="panel-description">Finde abgeschlossene Prozesse und wiederhole sie.</p>
+              </div>
+              <div class="panel-actions">
+                <button type="button" id="clear-history" class="button button-secondary">Verlauf löschen</button>
+              </div>
+            </header>
+
+            <div class="panel-body">
+              <div class="toolbar">
+                <div class="toolbar-group">
+                  <label class="visually-hidden" for="history-search">Verlauf durchsuchen</label>
+                  <div class="search-input">
+                    <input
+                      type="search"
+                      id="history-search"
+                      placeholder="Nach LCSC ID oder Bibliothek suchen"
+                      autocomplete="off"
+                    />
+                    <button type="button" id="history-clear-search" class="button button-tertiary" aria-label="Suche löschen">
+                      ×
+                    </button>
+                  </div>
+                </div>
+                <div class="toolbar-group">
+                  <label class="visually-hidden" for="history-filter">Status filtern</label>
+                  <select id="history-filter">
+                    <option value="all">Alle Status</option>
+                    <option value="completed">Abgeschlossen</option>
+                    <option value="running">Laufend</option>
+                    <option value="queued">Wartend</option>
+                    <option value="failed">Fehler</option>
+                  </select>
+                </div>
+              </div>
+
+              <div id="history-list" class="collection" data-state="empty" role="status" aria-live="polite">
+                <div class="collection-placeholder" data-state="empty">Noch keine Einträge.</div>
+                <div class="collection-placeholder" data-state="loading">Lade Verlauf …</div>
+                <div class="collection-placeholder" data-state="error">Verlauf konnte nicht geladen werden.</div>
+              </div>
+              <button type="button" id="history-load-more" class="button button-secondary" hidden>
+                Mehr laden
               </button>
             </div>
           </div>
+        </section>
 
-          <div id="path-browser" class="path-browser hidden">
-            <div class="path-browser-header">
-              <select id="path-roots"></select>
-              <div class="path-browser-controls">
-                <button type="button" id="path-up" class="secondary" title="Eine Ebene nach oben">▲</button>
-                <button type="button" id="path-close" class="secondary" title="Picker schließen">Schließen</button>
+        <section id="tab-settings" class="tab-content" role="tabpanel" aria-labelledby="tab-button-settings">
+          <div class="panel">
+            <header class="panel-header">
+              <div>
+                <h2>Einstellungen</h2>
+                <p class="panel-description">Standardwerte und Verhalten steuern.</p>
               </div>
+            </header>
+
+          <div class="panel-body settings-grid">
+            <div class="field">
+              <label for="setting-server-url">Server-URL</label>
+              <input id="setting-server-url" type="text" placeholder="http://localhost:8087" />
             </div>
 
-            <div class="path-quick" id="path-quick"></div>
-
-            <div class="path-browser-current" id="path-breadcrumb"></div>
-
-            <div class="path-input-row">
-              <input id="path-manual" type="text" placeholder="Pfad eingeben oder einfügen" />
-              <button type="button" id="path-go" class="secondary">Gehe zu</button>
-            </div>
-
-            <ul id="path-entries" class="path-list" tabindex="0" aria-label="Ordnerliste"></ul>
-
-            <div class="path-browser-footer">
-              <div id="path-info" class="path-info"></div>
-              <div class="path-browser-actions">
-                <button type="button" id="path-apply" class="primary">
-                  Diesen Ordner verwenden
+              <div class="field">
+                <label for="setting-default-path">Standardpfad</label>
+                <input id="setting-default-path" type="text" placeholder="Pfad wählen oder eintragen" />
+                <button type="button" id="setting-use-selected" class="button button-tertiary">
+                  Aus Auswahl übernehmen
                 </button>
               </div>
-              <p id="path-error" class="error-message"></p>
-            </div>
-          </div>
 
-          <fieldset class="field-group">
-            <legend>Ausgabe</legend>
-            <label class="checkbox">
-              <input type="checkbox" id="generate-symbol" checked />
-              <span>Symbol</span>
-            </label>
-            <label class="checkbox">
-              <input type="checkbox" id="generate-footprint" />
-              <span>Footprint</span>
-            </label>
-            <label class="checkbox">
-              <input type="checkbox" id="generate-model" />
-              <span>3D-Modell</span>
-            </label>
-            <label class="checkbox">
-              <input type="checkbox" id="overwrite-existing" />
-              <span>Bestehende Dateien überschreiben</span>
-            </label>
-          </fieldset>
+              <div class="field">
+                <label for="setting-default-name">Standardname</label>
+                <input id="setting-default-name" type="text" placeholder="easyeda2kicad" />
+              </div>
 
-          <button type="submit" id="submit-job" class="primary">Job starten</button>
-          <p id="job-error" class="error-message"></p>
-        </form>
+              <fieldset class="field-group settings-group">
+                <legend>Downloads</legend>
+                <label class="checkbox">
+                  <input type="checkbox" id="setting-overwrite-footprints" />
+                  <span>Footprints überschreiben (Quick Download)</span>
+                </label>
 
-        <div class="card">
-          <h2>Aktive Jobs</h2>
-          <div id="jobs-list" class="job-list empty">
-            <p>Keine aktiven Jobs.</p>
-          </div>
+                <label class="checkbox">
+                  <input type="checkbox" id="setting-overwrite-models" />
+                  <span>3D-Modelle überschreiben (Quick Download)</span>
+                </label>
+
+                <label class="checkbox">
+                  <input type="checkbox" id="setting-debug-logs" />
+                  <span>Debug-Logs in der Konsole anzeigen</span>
+                </label>
+              </fieldset>
+
+          <p id="settings-feedback" class="feedback"></p>
         </div>
-      </section>
-
-      <section id="tab-history" class="tab-content">
-        <div class="card history-header">
-          <h2>Verlauf</h2>
-          <button type="button" id="clear-history" class="secondary">Verlauf löschen</button>
-        </div>
-        <div id="history-list" class="history-list card empty">
-          <p>Noch keine Einträge.</p>
-        </div>
-      </section>
-
-      <section id="tab-settings" class="tab-content">
-        <div class="card">
-          <div class="field">
-            <label for="setting-server-url">Server-URL</label>
-            <input id="setting-server-url" type="text" placeholder="http://localhost:8087" />
-          </div>
-
-          <div class="field">
-            <label for="setting-default-path">Standardpfad</label>
-            <input id="setting-default-path" type="text" placeholder="Pfad wählen oder eintragen" />
-            <button type="button" id="setting-use-selected" class="secondary">
-              Aus Auswahl übernehmen
-            </button>
-          </div>
-
-          <div class="field">
-            <label for="setting-default-name">Standardname</label>
-            <input id="setting-default-name" type="text" placeholder="easyeda2kicad" />
-          </div>
-
-          <label class="checkbox">
-            <input type="checkbox" id="setting-notifications" checked />
-            <span>Benachrichtigungen anzeigen</span>
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="setting-overwrite-footprints" />
-            <span>Footprints überschreiben (Quick Download)</span>
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="setting-overwrite-models" />
-            <span>3D-Modelle überschreiben (Quick Download)</span>
-          </label>
-
-          <label class="checkbox">
-            <input type="checkbox" id="setting-debug-logs" />
-            <span>Debug-Logs in der Konsole anzeigen</span>
-          </label>
-
-          <div class="settings-actions">
-            <button type="button" id="settings-save" class="primary">Einstellungen speichern</button>
-            <span id="settings-feedback" class="success-message"></span>
-          </div>
-        </div>
-      </section>
+      </div>
+    </section>
+      </main>
     </div>
 
     <script src="popup.js" type="module"></script>
