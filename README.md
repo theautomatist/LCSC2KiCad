@@ -17,16 +17,16 @@ flowchart LR
 ```
 
 ## What is included
-- `easyeda2kicad/`: Python conversion engine and CLI.
+- `easyeda2kicad/`: Python conversion engine and backend modules.
 - `run_server.py`: FastAPI backend for the extension.
 - `chrome_extension/`: Chrome MV3 extension UI that talks to the local backend.
 
 ## Quick start
-1. Create a virtual environment and install in editable mode:
+1. Create a virtual environment and install dependencies:
    ```bash
    python -m venv env
    source env/bin/activate
-   python setup.py develop
+   python -m pip install -r requirements.txt
    ```
 2. Start the backend:
    ```bash
@@ -95,10 +95,12 @@ flowchart LR
   python -m unittest discover -s tests
   ```
 - Code style: Black (88), isort, flake8, pycln, bandit, and Prettier for JS/CSS/HTML.
-- Pre-commit hooks are configured in `.pre-commit-config.yaml`.
 
 ## Credits
 This project builds on the original easyeda2kicad work by uPesy: https://github.com/uPesy/easyeda2kicad.py
+
+> [!NOTE]
+> The upstream repository appears unmaintained, so this project includes fixes and ongoing improvements.
 
 
 
