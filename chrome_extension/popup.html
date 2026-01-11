@@ -63,26 +63,6 @@
                   </div>
                 </div>
                 <div class="col-12">
-                  <div class="row gy-2 gx-3">
-                    <div class="col-12 col-sm-6">
-                      <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="parts-overwrite" />
-                        <label class="form-check-label" for="parts-overwrite">Overwrite footprints &amp; symbols</label>
-                      </div>
-                    </div>
-                    <div class="col-12 col-sm-6">
-                      <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="parts-overwrite-model" />
-                        <label class="form-check-label" for="parts-overwrite-model">Overwrite 3D models</label>
-                      </div>
-                    </div>
-                    <div class="col-12">
-                      <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" id="parts-project-relative" />
-                        <label class="form-check-label" for="parts-project-relative">Store 3D paths project relative</label>
-                      </div>
-                    </div>
-                  </div>
                 </div>
                 <div class="col-12">
                   <button class="btn btn-primary w-100" type="submit" id="parts-submit">Download</button>
@@ -153,6 +133,14 @@
                     <input class="form-check-input" type="checkbox" id="settings-project-relative" />
                     <label class="form-check-label" for="settings-project-relative">Project relative 3D paths by default</label>
                   </div>
+                  <div class="mt-2" id="settings-project-relative-path-group" hidden>
+                    <label class="form-label" for="settings-project-relative-path">Default project relative 3D base path</label>
+                    <div class="input-group">
+                      <span class="input-group-text">${KIPRJMOD}</span>
+                      <input class="form-control" id="settings-project-relative-path" type="text" placeholder="../../library" />
+                    </div>
+                    <div class="form-text">Used as the default when creating new libraries.</div>
+                  </div>
                 </div>
               </form>
             </div>
@@ -218,6 +206,14 @@
                     <div class="form-check form-switch">
                       <input class="form-check-input" type="checkbox" id="library-create-project" checked />
                       <label class="form-check-label" for="library-create-project">Project relative 3D paths</label>
+                    </div>
+                    <div class="mt-2" id="library-create-project-path-group" hidden>
+                      <label class="form-label" for="library-create-project-path">Project relative 3D base path</label>
+                      <div class="input-group">
+                        <span class="input-group-text">${KIPRJMOD}</span>
+                        <input id="library-create-project-path" type="text" class="form-control" placeholder="../../library" />
+                      </div>
+                      <div class="form-text">The library name plus <code>.3dshapes</code> is appended automatically.</div>
                     </div>
                   </div>
                 </form>

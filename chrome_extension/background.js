@@ -17,6 +17,7 @@ const DEFAULT_STATE = {
   overwriteModels: false,
   debugLogs: false,
   projectRelative: false,
+  projectRelativePath: "",
   libraryTotals: { symbols: 0, footprints: 0, models: 0 },
 };
 
@@ -31,6 +32,40 @@ let state = {
 const jobPollers = new Map();
 let healthTimer = null;
 let initialized = false;
+
+function normalizeBoolean(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["false", "0", "no", "off", ""].includes(normalized)) {
+      return false;
+    }
+  }
+  return fallback;
+}
+
+function normalizeProjectRelativePath(value) {
+  if (value == null) {
+    return "";
+  }
+  let path = String(value).trim();
+  if (!path) {
+    return "";
+  }
+  if (path.startsWith("${KIPRJMOD}")) {
+    path = path.slice("${KIPRJMOD}".length);
+  }
+  path = path.replace(/\\/g, "/");
+  return path;
+}
 
 function sanitizeLibraryName(name) {
   if (!name) {
@@ -65,6 +100,20 @@ function deriveLibraryPrefix(library) {
     return normalizePath(stripLibrarySuffix(library.symbolPath));
   }
   return "";
+}
+
+function getSelectedLibraryRecord() {
+  const selected = normalizePath(state.selectedLibraryPath || "");
+  if (selected) {
+    const match = state.libraries.find((library) => {
+      const prefix = normalizePath(library.path || library.resolvedPrefix || "");
+      return prefix && prefix === selected;
+    });
+    if (match) {
+      return match;
+    }
+  }
+  return state.libraries.find((library) => library.active) || null;
 }
 
 async function ensureSelectedLibrary(force = false) {
@@ -215,6 +264,13 @@ function normalizeLibraryRecord(raw) {
     footprint: Number(raw?.counts?.footprint) || 0,
     model: Number(raw?.counts?.model) || 0,
   };
+  const projectRelative = normalizeBoolean(
+    raw.projectRelative ?? raw.project_relative,
+    false
+  );
+  const projectRelativePath = normalizeProjectRelativePath(
+    raw.projectRelativePath ?? raw.project_relative_path ?? ""
+  );
   return {
     id: raw.id || createLibraryId(),
     name,
@@ -233,6 +289,8 @@ function normalizeLibraryRecord(raw) {
     counts,
     warnings: Array.isArray(raw.warnings) ? raw.warnings : [],
     projectId: raw.projectId || "default",
+    projectRelative,
+    projectRelativePath,
     lastValidation: raw.lastValidation || null,
   };
 }
@@ -266,10 +324,11 @@ async function init() {
       jobMeta: stored.jobMeta || {},
       selectedLibraryPath: stored.selectedLibraryPath || stored.defaultLibraryPath || "",
       selectedLibraryName: stored.selectedLibraryName || stored.defaultLibraryName || "",
-      overwriteFootprints: Boolean(stored.overwriteFootprints),
-      overwriteModels: Boolean(stored.overwriteModels),
-      debugLogs: Boolean(stored.debugLogs),
-      projectRelative: Boolean(stored.projectRelative),
+      overwriteFootprints: normalizeBoolean(stored.overwriteFootprints),
+      overwriteModels: normalizeBoolean(stored.overwriteModels),
+      debugLogs: normalizeBoolean(stored.debugLogs),
+      projectRelative: normalizeBoolean(stored.projectRelative),
+      projectRelativePath: normalizeProjectRelativePath(stored.projectRelativePath),
       libraryTotals: stored.libraryTotals || { symbols: 0, footprints: 0, models: 0 },
     };
     recalcLibraryTotals();
@@ -633,6 +692,7 @@ function snapshotState() {
     overwriteModels: state.overwriteModels,
     debugLogs: state.debugLogs,
     projectRelative: state.projectRelative,
+    projectRelativePath: state.projectRelativePath,
     jobs: jobsArray,
     jobHistory: historyArray,
   };
@@ -690,6 +750,7 @@ async function submitJob(payload) {
     model: Boolean(payload.model),
     overwrite_model: Boolean(payload.overwrite_model),
     project_relative: Boolean(payload.projectRelative),
+    project_relative_path: normalizeProjectRelativePath(payload.projectRelativePath),
   };
 
   const response = await apiFetch("tasks", {
@@ -736,6 +797,10 @@ async function handleCreateLibrary(payload = {}) {
     model: Boolean(payload.model),
     project_relative: Boolean(payload.projectRelative),
   });
+  const projectRelative = normalizeBoolean(payload.projectRelative);
+  const projectRelativePath = normalizeProjectRelativePath(
+    payload.projectRelativePath || (projectRelative ? state.projectRelativePath : "")
+  );
   const now = new Date().toISOString();
   const existing = state.libraries.find(
     (library) => library.path === normalizePath(scaffold.resolved_library_prefix),
@@ -762,6 +827,8 @@ async function handleCreateLibrary(payload = {}) {
     },
     warnings: [],
     projectId: payload.projectId || existing?.projectId || "default",
+    projectRelative,
+    projectRelativePath,
     lastValidation: now,
   };
   const stored = upsertLibraryRecord(record);
@@ -798,6 +865,13 @@ async function handleImportLibrary(payload = {}) {
     const existingSymbol = normalizePath(library.symbolPath || `${existingPrefix}.kicad_sym`);
     return existingSymbol === resolvedSymbol || existingPrefix === stripLibrarySuffix(resolvedSymbol);
   });
+  const projectRelative = normalizeBoolean(
+    payload.projectRelative ?? existing?.projectRelative,
+    false
+  );
+  const projectRelativePath = normalizeProjectRelativePath(
+    payload.projectRelativePath ?? existing?.projectRelativePath ?? ""
+  );
   const parentPath = normalizePath(resolvedSymbol.replace(/[\\/][^\\/]*$/, ""));
   const record = {
     id: existing?.id || createLibraryId(),
@@ -821,6 +895,8 @@ async function handleImportLibrary(payload = {}) {
     },
     warnings: Array.isArray(validation.warnings) ? validation.warnings : [],
     projectId: payload.projectId || existing?.projectId || "default",
+    projectRelative,
+    projectRelativePath,
     lastValidation: now,
   };
   const stored = upsertLibraryRecord(record);
@@ -900,12 +976,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (typeof message.projectRelative === "boolean") {
           state.projectRelative = message.projectRelative;
         }
+        if (typeof message.projectRelativePath === "string") {
+          state.projectRelativePath = normalizeProjectRelativePath(message.projectRelativePath);
+        }
         await persistState([
           "serverUrl",
           "overwriteFootprints",
           "overwriteModels",
           "debugLogs",
           "projectRelative",
+          "projectRelativePath",
         ]);
         await checkHealth();
         return snapshotState();
@@ -964,6 +1044,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             || lcscId,
         );
 
+        const selectedLibrary = getSelectedLibraryRecord();
+        const projectRelative = selectedLibrary
+          ? normalizeBoolean(selectedLibrary.projectRelative, false)
+          : Boolean(state.projectRelative);
+        const projectRelativePath = selectedLibrary
+          ? normalizeProjectRelativePath(
+              selectedLibrary.projectRelativePath || state.projectRelativePath
+            )
+          : normalizeProjectRelativePath(state.projectRelativePath);
+
         const payload = {
           lcscId,
           libraryPath: basePath,
@@ -973,7 +1063,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           model: true,
           overwrite: Boolean(state.overwriteFootprints),
           overwrite_model: Boolean(state.overwriteModels),
-          projectRelative: Boolean(state.projectRelative),
+          projectRelative,
+          projectRelativePath,
         };
 
         const summary = await submitJob(payload);

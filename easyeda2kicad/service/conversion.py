@@ -55,6 +55,7 @@ class ConversionRequest:
     generate_model: bool = False
     kicad_version: KicadVersion = KicadVersion.v6
     project_relative: bool = False
+    project_relative_path: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.lcsc_id or not self.lcsc_id.startswith("C"):
@@ -309,7 +310,22 @@ def run_conversion(
         footprint_filename = f"{easyeda_footprint.info.name}.kicad_mod"
         model_path = str(model_dir).replace("\\", "/").replace("./", "/")
         if request.project_relative:
-            model_path = "${KIPRJMOD}" + model_path
+            relative_path = (request.project_relative_path or "").strip().replace("\\", "/")
+            if relative_path.startswith("${KIPRJMOD}"):
+                relative_path = relative_path[len("${KIPRJMOD}"):]
+            if relative_path:
+                if not relative_path.startswith("/"):
+                    relative_path = f"/{relative_path}"
+                if relative_path.endswith(".3dshapes"):
+                    model_path = "${KIPRJMOD}" + relative_path
+                else:
+                    model_path = (
+                        "${KIPRJMOD}"
+                        + relative_path.rstrip("/")
+                        + f"/{output_path.name}.3dshapes"
+                    )
+            else:
+                model_path = "${KIPRJMOD}/" + f"{output_path.name}.3dshapes"
 
         if footprint_exists and not request.overwrite:
             result.messages.append(

@@ -1,0 +1,32 @@
+name: Package Chrome extension
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    env:
+      EXT_DIR: chrome_extension
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify extension manifest
+        run: |
+          test -d "$EXT_DIR" || { echo "Missing $EXT_DIR"; exit 1; }
+          test -f "$EXT_DIR/manifest.json" || { echo "Missing manifest.json"; exit 1; }
+
+      - name: Create extension zip
+        run: |
+          SRC="$EXT_DIR"
+          if [ -d "$EXT_DIR/dist" ]; then SRC="$EXT_DIR/dist"; fi
+          zip -r extension.zip "$SRC" -x "**/node_modules/**" "**/.git/**" "**/.vscode/**" "**/*.map"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-extension-zip
+          path: extension.zip

@@ -1,113 +1,82 @@
-# easyeda2kicad v0.8.0
+# easyeda2kicad companion
 
-_________________
-[![PyPI version](https://badge.fury.io/py/easyeda2kicad.svg)](https://badge.fury.io/py/easyeda2kicad)
-[![License](https://img.shields.io/github/license/upesy/easyeda2kicad.py.svg)](https://pypi.org/project/isort/)
-[![Downloads](https://pepy.tech/badge/easyeda2kicad)](https://pepy.tech/project/easyeda2kicad)
-![Python versions](https://img.shields.io/pypi/pyversions/easyeda2kicad.svg)
-[![Git hook: pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
-[![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
-_________________
+Convert EasyEDA/LCSC components into KiCad libraries and manage them from a Chrome extension. This repository now combines the core EasyEDA conversion project, a local backend API, and a browser extension that can create or update library files on your machine.
 
+> [!WARNING]
+> EasyEDA source data can contain issues. ALWAYS CHECK PINS AND FOOTPRINTS before using converted parts in production designs.
 
-A Python script that converts any electronic components from [EasyEDA](https://easyeda.com/) or [LCSC](https://www.lcsc.com/) to a Kicad library including **3D model** in color. This tool will speed up your PCB design workflow especially when using [JLCPCB SMT assembly services](https://jlcpcb.com/caa). **It supports library formats for both Kicad v6.x and Kicad v5.x.**
+## Introduction
+This repo connects the LCSC catalog, a Chrome extension UI, and a local backend so you can generate and update KiCad libraries on your machine. The backend coordinates EasyEDA data fetching and KiCad export, while the extension provides the workflow inside your browser.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/uPesy/easyeda2kicad.py/master/ressources/demo_symbol.png" width="500">
-</p>
-<div align="center">
-  <img src="https://raw.githubusercontent.com/uPesy/easyeda2kicad.py/master/ressources/demo_footprint.png" width="500">
-</div>
-
-
-## 🎆 Sponsor and Support
-
-If this tool has saved you a lot of time when designing a PCB, please consider supporting the project by :
-- Subscribing to uPesy Premium Membership to have access to high-quality electronics tutorials at https://www.upesy.com/products/subscription
-- Buying one of my ESP32 DevKit boards: https://www.upesy.com/pages/store
-
-<div align="center">
-<a href="https://www.upesy.com/" target="_blank"><img src="https://raw.githubusercontent.com/uPesy/easyeda2kicad.py/master/ressources/upesy_store.jpg" width="350"/></a>
-</div>
-
-## 💾 Installation
-
-```bash
-pip install easyeda2kicad
+```mermaid
+flowchart LR
+    lcsc[LCSC] <--> ext[Chrome extension]
+    ext <--> backend[Local backend API]
+    backend <--> easyeda[EasyEDA library]
+    backend <--> kicad[KiCad library]
 ```
 
-## 💻 Usage
+## What is included
+- `easyeda2kicad/`: Python conversion engine and CLI.
+- `run_server.py`: FastAPI backend for the extension.
+- `chrome_extension/`: Chrome MV3 extension UI that talks to the local backend.
 
+## Quick start
+1. Create a virtual environment and install in editable mode:
+   ```bash
+   python -m venv env
+   source env/bin/activate
+   python setup.py develop
+   ```
+2. Start the backend:
+   ```bash
+   python run_server.py --host 0.0.0.0 --port 8087
+   ```
+3. Load the extension:
+   - Open `chrome://extensions`, enable Developer mode, click "Load unpacked".
+   - Select the `chrome_extension/` folder.
+4. Browse `https://www.lcsc.com/` and use the extension to export components.
+
+## CLI usage (optional)
+Generate libraries directly from the command line:
 ```bash
-# For symbol + footprint + 3d model (with --full argument)
 easyeda2kicad --full --lcsc_id=C2040
-# For symbol + footprint + 3d model
 easyeda2kicad --symbol --footprint --3d --lcsc_id=C2040
-# For symbol + footprint
-easyeda2kicad --symbol --footprint --lcsc_id=C2040
-# For symbol only
-easyeda2kicad --symbol --lcsc_id=C2040
-# For footprint only
-easyeda2kicad --footprint --lcsc_id=C2040
-# For 3d model only
-easyeda2kicad --3d --lcsc_id=C2040
-# For symbol in Kicad v5.x legacy format
 easyeda2kicad --symbol --lcsc_id=C2040 --v5
 ```
 
-By default, all librairies are saved in `C:/Users/your_name/Documents/Kicad/easyeda2kicad/`, with :
-- `easyeda2kicad.kicad_sym` file for Kicad v6.x symbol library
-- `easyeda2kicad.lib` file for Kicad v5.x legacy symbol library
-- `easyeda2kicad.pretty/` folder for footprint libraries
-- `easyeda2kicad.3dshapes/` folder for 3d models (in .WRL and .STEP format )
+## Library output
+By default, libraries are saved under:
+- Windows: `C:/Users/your_name/Documents/Kicad/easyeda2kicad/`
+- Linux: `/home/your_name/Documents/Kicad/easyeda2kicad/`
 
-If you want to save components symbol/footprint in your own libs, you can specify the output lib path by using `--output` option.
-
+Override the destination with:
 ```bash
 easyeda2kicad --full --lcsc_id=C2040 --output ~/libs/my_lib
 ```
 
-This command will save:
-- the symbol in `~/libs/my_lib.kicad_sym` file for symbol library. The file will be created if it doesn't exist.
-- the footprint in `~/libs/my_lib.pretty/` folder for footprint libraries. The folder will be created if it doesn't exist.
-- the 3d models in `~/libs/my_lib.3dshapes/` folder for 3d models. The folder will be created if it doesn't exist. The 3D models will be saved both in .WRL and .STEP format.
+## Project layout
+- `easyeda2kicad/api/`: FastAPI server routes.
+- `easyeda2kicad/easyeda/`: EasyEDA parsing and fetching.
+- `easyeda2kicad/kicad/`: KiCad export logic.
+- `easyeda2kicad/service/`: Conversion orchestration.
+- `tests/`: API and conversion tests.
+- `ressources/` and `samples/`: images and examples.
 
-You can use the option `--overwrite` to update a component symbol/footprint that is already in a Kicad library (generated by easyeda2kicad)
+## Configuration
+- Backend host/port are controlled by `HOST` and `PORT` or `run_server.py` args.
+- The extension expects the backend at `http://localhost:8087`. If you change the port, update `chrome_extension/manifest.json`.
 
-```bash
-easyeda2kicad --symbol --footprint --lcsc_id=C2040 --output ~/libs/my_lib --overwrite
-```
+> [!NOTE]
+> This repo includes fixes for several EasyEDA conversion edge cases and improves overall stability when exporting libraries.
 
-By default, easyeda2kicad will generate a symbol library for Kicad v6.x (.kicad_sym). You can generate a symbol lib in legacy format for Kicad v5.x (.lib) using `--v5` argument.
+## Development notes
+- Run tests:
+  ```bash
+  python -m unittest discover -s tests
+  ```
+- Code style: Black (88), isort, flake8, pycln, bandit, and Prettier for JS/CSS/HTML.
+- Pre-commit hooks are configured in `.pre-commit-config.yaml`.
 
-```bash
-easyeda2kicad --symbol --lcsc_id=C2040 --v5
-```
-
-## 🔗 Add libraries in Kicad
-
-**These are the instructions to add the default easyeda2kicad libraries in Kicad.**
-Before configuring KiCad, run the script at least once to create lib files. For example :
-
-```bash
-easyeda2kicad --symbol --footprint --lcsc_id=C2040
-```
-
-- In KiCad, Go to Preferences > Configure Paths, and add the environment variables `EASYEDA2KICAD` :
-  - Windows : `C:/Users/your_username/Documents/Kicad/easyeda2kicad/`,
-  - Linux : `/home/your_username/Documents/Kicad/easyeda2kicad/`
-- Go to Preferences > Manage Symbol Libraries, and Add the global library `easyeda2kicad` : `${EASYEDA2KICAD}/easyeda2kicad.kicad_sym`
-- Go to Preferences > Manage Footprint Libraries, and Add the global library `easyeda2kicad` : `${EASYEDA2KICAD}/easyeda2kicad.pretty`
-- Enjoy :wink:
-
-## 🔥 Important Notes
-### WARRANTY
-The correctness of the symbols and footprints converted by easyeda2kicad can't be guaranteed. Easyeda2kicad speeds up custom library design process, but you should remain careful and always double check the footprints and symbols generated.
-
-### Recent Fixes
-- Symbol pins now retain their EasyEDA-assigned numbers, preventing mismatches when importing multi-pin components.
-- Custom footprint polygons keep their reference pad inside the shape and honour EasyEDA stroke widths for rectangles.
-- Arc conversions clamp rounding issues to avoid invalid geometry, and symbol libraries stay well-formed when appending entries repeatedly.
-- Multi-unit symbols from EasyEDA subparts are now merged into a single KiCad part, keeping each unit accessible in v6 libraries.
+## License
+AGPL-3.0. See `LICENSE`.

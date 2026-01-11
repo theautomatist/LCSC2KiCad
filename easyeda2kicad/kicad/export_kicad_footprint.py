@@ -786,8 +786,16 @@ class ExporterFootprintKicad:
 
         if ki.model_3d is not None:
             model_base_name = sanitize_model_filename(ki.model_3d.name)
+            model_path = (model_3d_path or "").replace("\\", "/").strip().rstrip("/")
+            if "${KIPRJMOD}" in model_path:
+                cleaned = model_path.replace("..${KIPRJMOD}", "${KIPRJMOD}")
+                file_3d = f"{cleaned}/{model_base_name}.wrl"
+            elif model_path.startswith("${"):
+                file_3d = f"{model_path}/{model_base_name}.wrl"
+            else:
+                file_3d = f"..{model_path}/{model_base_name}.wrl"
             ki_lib += KI_MODEL_3D.format(
-                file_3d=f"..{model_3d_path}/{model_base_name}.wrl",
+                file_3d=file_3d,
                 pos_x=ki.model_3d.translation.x,
                 pos_y=ki.model_3d.translation.y,
                 pos_z=ki.model_3d.translation.z,

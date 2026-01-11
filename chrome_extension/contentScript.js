@@ -29,7 +29,12 @@ function sendRuntimeMessage(payload, { retries = 3, delay = 250 } = {}) {
         const runtimeError = chrome.runtime.lastError;
         if (runtimeError) {
           const message = runtimeError.message || "Runtime messaging error";
-          if (remaining > 0 && /no sw/i.test(message)) {
+          const normalized = message.toLowerCase();
+          if (normalized.includes("extension context invalidated")) {
+            reject(new Error("Extension updated or reloaded. Refresh the page and try again."));
+            return;
+          }
+          if (remaining > 0 && (/no sw/i.test(message) || normalized.includes("receiving end does not exist"))) {
             setTimeout(() => attempt(remaining - 1), delay);
             return;
           }

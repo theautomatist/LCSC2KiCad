@@ -116,6 +116,14 @@ body {
   box-shadow: none;
 }
 
+.card .input-group-text,
+.modal-content .input-group-text {
+  background-color: rgba(148, 163, 184, 0.22);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  font-weight: 600;
+}
+
 input[type=checkbox], input[type=checkbox]:focus  {
 	background-image: url(data:image/svg+xml;charset=utf-8;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9Jy00IC00IDggOCc+PGNpcmNsZSByPSczJyBmaWxsPSdyZ2JhKDAsIDAsIDAsIDAuMjUpJy8+PC9zdmc+);
 }

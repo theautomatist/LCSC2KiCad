@@ -73,6 +73,9 @@ class TaskCreatePayload(BaseModel):
     project_relative: bool = Field(
         False, description="Store 3D model path relative to project"
     )
+    project_relative_path: Optional[str] = Field(
+        None, description="Project-relative 3D model path suffix (prefixed by ${KIPRJMOD})"
+    )
 
     @field_validator("lcsc_id")
     @classmethod
@@ -641,6 +644,7 @@ def create_app(
                 generate_model=payload.model,
                 kicad_version=version,
                 project_relative=payload.project_relative,
+                project_relative_path=payload.project_relative_path,
             )
         except ConversionError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

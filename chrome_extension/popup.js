@@ -161,6 +161,7 @@ const state = {
     overwriteModel: false,
     debug: false,
     projectRelative: false,
+    projectRelativePath: "",
   },
   lastJob: null,
   ready: false,
@@ -188,6 +189,8 @@ async function init() {
   cacheElements();
   initModals();
   bindEvents();
+  toggleLibraryProjectPath();
+  toggleSettingsProjectPath();
   await loadUiPreferences();
   await hydrate();
   chrome.runtime.onMessage.addListener(handleRuntimeMessage);
@@ -211,9 +214,6 @@ function cacheElements() {
   elements.partsSymbol = document.getElementById("parts-symbol");
   elements.partsFootprint = document.getElementById("parts-footprint");
   elements.partsModel = document.getElementById("parts-model");
-  elements.partsOverwrite = document.getElementById("parts-overwrite");
-  elements.partsOverwriteModel = document.getElementById("parts-overwrite-model");
-  elements.partsProjectRelative = document.getElementById("parts-project-relative");
   elements.partsFeedback = document.getElementById("parts-feedback");
   elements.partsResult = document.getElementById("parts-result");
   elements.partsResultDetails = document.getElementById("parts-result-details");
@@ -239,6 +239,8 @@ function cacheElements() {
   elements.libraryCreateFootprint = document.getElementById("library-create-footprint");
   elements.libraryCreateModel = document.getElementById("library-create-model");
   elements.libraryCreateProject = document.getElementById("library-create-project");
+  elements.libraryCreateProjectPathGroup = document.getElementById("library-create-project-path-group");
+  elements.libraryCreateProjectPath = document.getElementById("library-create-project-path");
 
   // Settings
   elements.settingsForm = document.getElementById("settings-form");
@@ -248,6 +250,8 @@ function cacheElements() {
   elements.settingsOverwriteModel = document.getElementById("settings-overwrite-model");
   elements.settingsDebug = document.getElementById("settings-debug");
   elements.settingsProjectRelative = document.getElementById("settings-project-relative");
+  elements.settingsProjectRelativePathGroup = document.getElementById("settings-project-relative-path-group");
+  elements.settingsProjectRelativePath = document.getElementById("settings-project-relative-path");
   elements.settingsFeedback = document.getElementById("settings-feedback");
 
   // Modals shared
@@ -271,8 +275,12 @@ function initModals() {
       clearLibraryModalError();
       elements.libraryImportForm?.reset();
       elements.libraryCreateForm?.reset();
+      if (elements.libraryCreateProjectPath) {
+        elements.libraryCreateProjectPath.value = "";
+      }
       elements.libraryImportInfo.textContent = "";
       elements.libraryImportInfo.className = "form-text";
+      toggleLibraryProjectPath();
     });
   }
 }
@@ -331,12 +339,14 @@ function bindEvents() {
     tab.show();
   });
   elements.libraryModalSubmit?.addEventListener("click", submitCreateLibrary);
+  elements.libraryCreateProject?.addEventListener("change", toggleLibraryProjectPath);
 
   elements.libraryList?.addEventListener("change", handleLibraryListChange);
   elements.libraryList?.addEventListener("click", handleLibraryListClick);
 
   elements.settingsForm?.addEventListener("change", debounce(handleSettingsChange, 250));
   elements.settingsTest?.addEventListener("click", testServerConnection);
+  elements.settingsProjectRelative?.addEventListener("change", toggleSettingsProjectPath);
 
   elements.pickerManual?.addEventListener("input", handlePickerManualInput);
   elements.pickerManual?.addEventListener("change", handlePickerManualChange);
@@ -357,6 +367,21 @@ function bindEvents() {
       }
     }
   });
+}
+
+function toggleLibraryProjectPath() {
+  if (!elements.libraryCreateProjectPathGroup || !elements.libraryCreateProject) {
+    return;
+  }
+  const show = elements.libraryCreateProject.checked;
+  elements.libraryCreateProjectPathGroup.hidden = !show;
+  if (show && elements.libraryCreateProjectPath) {
+    if (!elements.libraryCreateProjectPath.value) {
+      elements.libraryCreateProjectPath.value = state.settings.projectRelativePath || "";
+    }
+  } else if (elements.libraryCreateProjectPath) {
+    elements.libraryCreateProjectPath.value = "";
+  }
 }
 
 async function loadUiPreferences() {
@@ -439,6 +464,9 @@ function applyState(snapshot = {}) {
   if (typeof snapshot.projectRelative === "boolean") {
     state.settings.projectRelative = snapshot.projectRelative;
   }
+  if (typeof snapshot.projectRelativePath === "string") {
+    state.settings.projectRelativePath = snapshot.projectRelativePath;
+  }
 
   renderConnectionStatus();
   renderPartsDefaults();
@@ -457,21 +485,9 @@ function renderConnectionStatus() {
 
 function renderPartsDefaults() {
   if (!state.ready) {
-    elements.partsOverwrite.checked = state.settings.overwrite;
-    elements.partsOverwriteModel.checked = state.settings.overwriteModel;
-    elements.partsProjectRelative.checked = state.settings.projectRelative;
     return;
   }
 
-  if (elements.partsOverwrite && !elements.partsOverwrite.matches(":focus")) {
-    elements.partsOverwrite.checked = state.settings.overwrite;
-  }
-  if (elements.partsOverwriteModel && !elements.partsOverwriteModel.matches(":focus")) {
-    elements.partsOverwriteModel.checked = state.settings.overwriteModel;
-  }
-  if (elements.partsProjectRelative && !elements.partsProjectRelative.matches(":focus")) {
-    elements.partsProjectRelative.checked = state.settings.projectRelative;
-  }
 }
 
 function renderLibraries() {
@@ -676,6 +692,10 @@ function renderSettings() {
   elements.settingsOverwriteModel.checked = state.settings.overwriteModel;
   elements.settingsDebug.checked = state.settings.debug;
   elements.settingsProjectRelative.checked = state.settings.projectRelative;
+  if (elements.settingsProjectRelativePath && !elements.settingsProjectRelativePath.matches(":focus")) {
+    elements.settingsProjectRelativePath.value = state.settings.projectRelativePath || "";
+  }
+  toggleSettingsProjectPath();
 }
 
 function setActiveTab(tab, options = {}) {
@@ -743,9 +763,10 @@ function handlePartsSubmit(event) {
     symbol: outputs.symbol,
     footprint: outputs.footprint,
     model: outputs.model,
-    overwrite: elements.partsOverwrite.checked,
-    overwrite_model: elements.partsOverwriteModel.checked,
-    projectRelative: elements.partsProjectRelative.checked,
+    overwrite: state.settings.overwrite,
+    overwrite_model: state.settings.overwriteModel,
+    projectRelative: Boolean(activeLibrary?.projectRelative),
+    projectRelativePath: activeLibrary?.projectRelativePath || state.settings.projectRelativePath || "",
   };
 
   elements.partsSubmit.disabled = true;
@@ -886,6 +907,11 @@ function submitCreateLibrary() {
     footprint: elements.libraryCreateFootprint.checked,
     model: elements.libraryCreateModel.checked,
     projectRelative: elements.libraryCreateProject.checked,
+    projectRelativePath: elements.libraryCreateProject.checked
+      ? (elements.libraryCreateProjectPath?.value.trim()
+          || state.settings.projectRelativePath
+          || "")
+      : "",
   };
 
   elements.libraryModalSubmit.disabled = true;
@@ -943,14 +969,20 @@ function persistLibraries() {
 }
 
 function handleSettingsChange() {
+  const rawProjectPath = elements.settingsProjectRelativePath?.value.trim() || "";
+  const projectRelativePath = elements.settingsProjectRelative.checked
+    ? rawProjectPath
+    : (state.settings.projectRelativePath || rawProjectPath);
   const payload = {
     serverUrl: elements.settingsServer.value.trim(),
     overwriteFootprints: elements.settingsOverwrite.checked,
     overwriteModels: elements.settingsOverwriteModel.checked,
     debugLogs: elements.settingsDebug.checked,
     projectRelative: elements.settingsProjectRelative.checked,
+    projectRelativePath,
   };
   state.settings.projectRelative = payload.projectRelative;
+  state.settings.projectRelativePath = projectRelativePath;
   saveUiPreferences();
   sendMessage("updateSettings", payload)
     .then((snapshot) => {
@@ -960,6 +992,14 @@ function handleSettingsChange() {
     .catch((error) => {
       setSettingsFeedback(error.message || "Saving failed", "text-danger");
     });
+}
+
+function toggleSettingsProjectPath() {
+  if (!elements.settingsProjectRelativePathGroup || !elements.settingsProjectRelative) {
+    return;
+  }
+  const show = elements.settingsProjectRelative.checked;
+  elements.settingsProjectRelativePathGroup.hidden = !show;
 }
 
 function testServerConnection() {
@@ -1013,6 +1053,15 @@ function setLibraryModalTab(mode) {
   if (tabTrigger) {
     const tab = new bootstrap.Tab(tabTrigger);
     tab.show();
+  }
+  if (mode === "create") {
+    if (elements.libraryCreateProject) {
+      elements.libraryCreateProject.checked = state.settings.projectRelative;
+    }
+    if (elements.libraryCreateProjectPath) {
+      elements.libraryCreateProjectPath.value = state.settings.projectRelativePath || "";
+    }
+    toggleLibraryProjectPath();
   }
 }
 
