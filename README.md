@@ -37,23 +37,43 @@ flowchart LR
    - Select the `chrome_extension/` folder.
 4. Browse `https://www.lcsc.com/` and use the extension to export components.
 
-## CLI usage (optional)
-Generate libraries directly from the command line:
-```bash
-easyeda2kicad --full --lcsc_id=C2040
-easyeda2kicad --symbol --footprint --3d --lcsc_id=C2040
-easyeda2kicad --symbol --lcsc_id=C2040 --v5
-```
+## UI and LCSC Website Integration
+| Extension settings |
+| --- |
+| ![Extension settings](img/extension_settings.png) |
+| Configure backend URL, overwrite defaults, and project-relative paths. |
 
-## Library output
-By default, libraries are saved under:
-- Windows: `C:/Users/your_name/Documents/Kicad/easyeda2kicad/`
-- Linux: `/home/your_name/Documents/Kicad/easyeda2kicad/`
+| Library management |
+| --- |
+| ![Library management](img/extension_libary.png) |
+| View existing libraries, counts, and status badges. |
 
-Override the destination with:
-```bash
-easyeda2kicad --full --lcsc_id=C2040 --output ~/libs/my_lib
-```
+| Add a library |
+| --- |
+| ![Add a library](img/extension_add_libary.png) |
+| Create a new library and choose output folders. |
+
+| Fetch new parts |
+| --- |
+| ![Fetch new parts](img/extension_get_new_parts.png) |
+| Request symbols, footprints, and 3D models from LCSC IDs. |
+
+| LCSC part page action |
+| --- |
+| ![LCSC part download button](img/browser_part_download.png) |
+| Download a single part directly from the product page. |
+
+| LCSC part downloaded |
+| --- |
+| ![LCSC part downloaded](img/browser_part_dowloaded.png) |
+| Confirms the part is available in the library. |
+
+| LCSC list actions |
+| --- |
+| ![LCSC list download buttons](img/browser_parts_download.png) |
+| Quick download buttons added to LCSC listing pages. |
+
+
 
 ## Project layout
 - `easyeda2kicad/api/`: FastAPI server routes.
@@ -61,7 +81,6 @@ easyeda2kicad --full --lcsc_id=C2040 --output ~/libs/my_lib
 - `easyeda2kicad/kicad/`: KiCad export logic.
 - `easyeda2kicad/service/`: Conversion orchestration.
 - `tests/`: API and conversion tests.
-- `ressources/` and `samples/`: images and examples.
 
 ## Configuration
 - Backend host/port are controlled by `HOST` and `PORT` or `run_server.py` args.
@@ -78,5 +97,14 @@ easyeda2kicad --full --lcsc_id=C2040 --output ~/libs/my_lib
 - Code style: Black (88), isort, flake8, pycln, bandit, and Prettier for JS/CSS/HTML.
 - Pre-commit hooks are configured in `.pre-commit-config.yaml`.
 
+## Credits
+This project builds on the original easyeda2kicad work by uPesy: https://github.com/uPesy/easyeda2kicad.py
+
+
+
 ## License
+
+> [!NOTE]
+> This repository includes code from the original AGPL-3.0 project, so the AGPL-3.0 license applies to that code. My intent for new contributions is "free to use, non-commercial only"; this note does not change the licensing of the original code.
+> 
 AGPL-3.0. See `LICENSE`.
