@@ -278,8 +278,10 @@ function initModals() {
       if (elements.libraryCreateProjectPath) {
         elements.libraryCreateProjectPath.value = "";
       }
-      elements.libraryImportInfo.textContent = "";
-      elements.libraryImportInfo.className = "form-text";
+      if (elements.libraryImportInfo) {
+        elements.libraryImportInfo.textContent = "";
+        elements.libraryImportInfo.className = "form-text";
+      }
       toggleLibraryProjectPath();
     });
     elements.libraryModal.addEventListener("shown.bs.modal", () => {
