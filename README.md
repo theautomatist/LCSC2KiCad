@@ -35,25 +35,16 @@ flowchart LR
 4. Browse `https://www.lcsc.com/` and use the extension to export components.
 
 ## UI and LCSC Website Integration
-| Extension settings |
-| --- |
-| ![Extension settings](img/extension_settings.png) |
-| Configure backend URL, overwrite defaults, and project-relative paths. |
+| Extension settings | Library management |
+| --- | --- |
+| ![Extension settings](img/extension_settings.png) |![Library management](img/extension_library.png) |
+| Configure backend URL, overwrite defaults, and project-relative paths. |View existing libraries, counts, and status badges. |
 
-| Library management |
-| --- |
-| ![Library management](img/extension_libary.png) |
-| View existing libraries, counts, and status badges. |
+| Add a library |Fetch new parts |
+| --- |--- |
+| ![Add a library](img/extension_add_library.png) | ![Fetch new parts](img/extension_get_new_parts.png) |
+| Create a new library and choose output folders. |Request symbols, footprints, and 3D models from LCSC IDs. |
 
-| Add a library |
-| --- |
-| ![Add a library](img/extension_add_libary.png) |
-| Create a new library and choose output folders. |
-
-| Fetch new parts |
-| --- |
-| ![Fetch new parts](img/extension_get_new_parts.png) |
-| Request symbols, footprints, and 3D models from LCSC IDs. |
 
 | LCSC part page action |
 | --- |
@@ -94,12 +85,7 @@ flowchart LR
 - Code style: Black (88), isort, flake8, pycln, bandit, and Prettier for JS/CSS/HTML.
 
 ## Credits
-This project builds on the original easyeda2kicad work by uPesy: https://github.com/uPesy/easyeda2kicad.py
-
-> [!NOTE]
-> The upstream repository appears unmaintained, so this project includes fixes and ongoing improvements.
-
-
+This project builds on the original [easyeda2kicad](https://github.com/uPesy/easyeda2kicad.py) work by uPesy
 
 ## License
 
