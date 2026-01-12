@@ -14,6 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="dev-${GITHUB_SHA::7}"
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
       - name: Verify extension manifest
         run: |
           test -d "$EXT_DIR" || { echo "Missing $EXT_DIR"; exit 1; }
@@ -23,10 +33,10 @@ jobs:
         run: |
           SRC="$EXT_DIR"
           if [ -d "$EXT_DIR/dist" ]; then SRC="$EXT_DIR/dist"; fi
-          zip -r extension.zip "$SRC" -x "**/node_modules/**" "**/.git/**" "**/.vscode/**" "**/*.map"
+          zip -r "LCSC2KiCad-${VERSION}-Chrome.zip" "$SRC" -x "**/node_modules/**" "**/.git/**" "**/.vscode/**" "**/*.map"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: chrome-extension-zip
-          path: extension.zip
+          name: LCSC2KiCad-${{ env.VERSION }}-Chrome
+          path: LCSC2KiCad-${{ env.VERSION }}-Chrome.zip
