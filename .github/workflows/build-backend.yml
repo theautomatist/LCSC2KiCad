@@ -18,7 +18,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     env:
-      APP_NAME: LCSC2KiCad
+      APP_NAME: KiCadPartsImporter
       PYTHON_VERSION: "3.11"
     steps:
       - uses: actions/checkout@v4
@@ -84,7 +84,7 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           mkdir -p out
-          OUTPUT_NAME="${APP_NAME}-${VERSION}"
+          OUTPUT_NAME="${VERSION}-${APP_NAME}"
           cp "dist/$APP_NAME" "out/$OUTPUT_NAME"
           zip -j "out/${OUTPUT_NAME}-${OS_NAME}.zip" "out/$OUTPUT_NAME"
 
@@ -93,14 +93,14 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
-          $OutputName = "$env:APP_NAME-$env:VERSION"
+          $OutputName = "$env:VERSION-$env:APP_NAME"
           Copy-Item "dist\\$env:APP_NAME.exe" "out\\$OutputName.exe"
           Compress-Archive -Path "out\\$OutputName.exe" -DestinationPath "out\\$OutputName-$env:OS_NAME.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LCSC2KiCad-${{ env.VERSION }}-${{ env.OS_NAME }}
+          name: ${{ env.VERSION }}-KiCadPartsImporter-${{ env.OS_NAME }}
           path: out/*
 
   package-extension:
@@ -130,13 +130,13 @@ jobs:
         run: |
           SRC="$EXT_DIR"
           if [ -d "$EXT_DIR/dist" ]; then SRC="$EXT_DIR/dist"; fi
-          zip -r "LCSC2KiCad-${VERSION}-Chrome.zip" "$SRC" -x "**/node_modules/**" "**/.git/**" "**/.vscode/**" "**/*.map"
+          zip -r "${VERSION}-KiCadPartsImporter-Chrome.zip" "$SRC" -x "**/node_modules/**" "**/.git/**" "**/.vscode/**" "**/*.map"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LCSC2KiCad-${{ env.VERSION }}-Chrome
-          path: LCSC2KiCad-${{ env.VERSION }}-Chrome.zip
+          name: ${{ env.VERSION }}-KiCadPartsImporter-Chrome
+          path: ${{ env.VERSION }}-KiCadPartsImporter-Chrome.zip
 
   release:
     name: Publish release

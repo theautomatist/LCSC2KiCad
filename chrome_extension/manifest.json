@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "KiCad Parts Importer",
+  "name": "KiCadPartsImporter",
   "version": "1.0.1",
   "description": "Download KiCad symbols, footprints & 3D models from LCSC in one click.",
   "permissions": [
